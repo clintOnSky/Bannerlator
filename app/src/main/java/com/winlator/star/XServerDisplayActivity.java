@@ -1315,6 +1315,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
 
+        // Apply the container's Vulkan renderer settings (native rendering, present mode, filter,
+        // swap R/B). These were previously parsed by the UI but never applied to the renderer.
+        if (useVulkan && renderer instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
+            com.winlator.star.renderer.vulkan.VulkanRenderer vkRenderer =
+                (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
+            String gdConfig = shortcut != null
+                ? shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig())
+                : container.getGraphicsDriverConfig();
+            com.winlator.star.core.KeyValueSet vkCfg = new com.winlator.star.core.KeyValueSet(gdConfig);
+            String pm = vkCfg.get("presentMode", "fifo");
+            int pmInt = pm.contains("immediate") ? 0 : pm.contains("mailbox") ? 1 : 2; // VK present mode
+            vkRenderer.setVkPresentMode(pmInt);
+            vkRenderer.setFilterMode("1".equals(vkCfg.get("filterMode", "0")) ? 1 : 0);
+            vkRenderer.setSwapRB(vkCfg.getBoolean("swapRB", false));
+            // Must run before the surface is created so onSurfaceCreated sets up the scanout path.
+            vkRenderer.setInitialNativeMode(vkCfg.getBoolean("native", false));
+        }
+
         if (shortcut != null) {
             renderer.setUnviewableWMClasses("explorer.exe");
         }

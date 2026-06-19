@@ -652,6 +652,12 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     public boolean isNativeMode() { return nativeMode; }
 
+    // Set the desired native (direct-scanout) mode BEFORE the surface is created. onSurfaceCreated
+    // sets up the scanout SurfaceControls when nativeMode is already true, so this is the correct
+    // entry point for applying the container's "native" toggle at launch (setNativeMode() is for
+    // toggling at runtime, with the full SurfaceControl rebuild + toast).
+    public void setInitialNativeMode(boolean v) { this.nativeMode = v; }
+
     public void setDriverInfo(String driverPath, String libraryName, String nativeLibDir) {
         this.driverPath = driverPath;
         this.driverLibraryName = libraryName;

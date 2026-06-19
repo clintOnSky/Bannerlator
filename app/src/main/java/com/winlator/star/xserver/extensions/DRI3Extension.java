@@ -154,11 +154,12 @@ public class DRI3Extension implements Extension {
     private void pixmapFromHardwareBuffer(XClient client, int pixmapId, short width, short height, byte depth, int fd) throws IOException, XRequestError {
         try {
             GPUImage gpuImage = new GPUImage(fd);
-            // The socket-imported GPUImage never locks the buffer, so getStride()==0 here,
-            // which created a zero-width drawable -> copyArea composited nothing -> black
-            // Vulkan content. Use the real pixmap width (matches the SHM pixmapFromFd path).
-            Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, width, height, depth);
+            // GPUImage(fd) now locks the buffer, so getStride() is valid (matches the SHM path's
+            // stride-based width). Mark the drawable directScanout so the Vulkan renderer can
+            // present the AHB directly instead of compositing a blank CPU buffer (-> black).
+            Drawable drawable = client.xServer.drawableManager.createDrawable(pixmapId, gpuImage.getStride(), height, depth);
             drawable.setTexture(gpuImage);
+            drawable.setDirectScanout(true);
             client.xServer.pixmapManager.createPixmap(drawable);
         }
         finally {

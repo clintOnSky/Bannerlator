@@ -123,32 +123,48 @@ public class PresentExtension implements Extension {
         if (pixmap == null) throw new BadPixmap(pixmapId);
 
         Drawable content = window.getContent();
-        if (content.visual.depth != pixmap.drawable.visual.depth) throw new BadMatch();
+        int contentDepth = content.visual.depth;
+        int pixmapDepth = pixmap.drawable.visual.depth;
+        boolean depthCompat = (contentDepth == pixmapDepth) ||
+            ((contentDepth == 24 || contentDepth == 32) && (pixmapDepth == 24 || pixmapDepth == 32));
+        if (!depthCompat) throw new BadMatch();
+
+        final com.winlator.star.renderer.HostRenderer xr = client.xServer.getRenderer();
+        final com.winlator.star.renderer.vulkan.VulkanRenderer vr =
+            (xr instanceof com.winlator.star.renderer.vulkan.VulkanRenderer)
+                ? (com.winlator.star.renderer.vulkan.VulkanRenderer) xr : null;
 
         long ust = System.nanoTime() / 1000;
         long msc = ust / FAKE_INTERVAL;
 
-        // AHB-backed pixmaps (native Vulkan / DXVK / vkd3d, DRI3 modifier 1255) carry their
-        // pixels in GPU memory; the socket-imported GPUImage is never CPU-locked, so the generic
-        // copyArea path would composite its blank CPU buffer -> black. Route them straight to the
-        // Vulkan renderer's native AHB present (nativeUpdateWindowContentAHB) instead. SHM pixmaps
-        // (texture == null, real CPU data) keep using copyArea below.
-        com.winlator.star.renderer.HostRenderer hr = client.xServer.getRenderer();
-        com.winlator.star.renderer.Texture srcTex = pixmap.drawable.getTexture();
-        if (hr instanceof com.winlator.star.renderer.vulkan.VulkanRenderer
-                && srcTex instanceof GPUImage
-                && ((GPUImage)srcTex).getHardwareBufferPtr() != 0) {
-            ((com.winlator.star.renderer.vulkan.VulkanRenderer)hr)
-                .onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
-            sendIdleNotify(window, pixmap, serial, idleFence);
-            sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
-            return;
-        }
-
+        // AHB-backed pixmaps (native Vulkan / DXVK / vkd3d, DRI3 modifier 1255) carry their pixels
+        // in an AHardwareBuffer, not in the CPU `data` buffer. Present them through the renderer's
+        // AHB path instead of the generic copyArea (which would composite a blank buffer -> black):
+        //   1. Vulkan native scanout + directScanout -> FLIP: swap the content texture to the
+        //      pixmap's GPUImage and scan it out directly (zero copy).
+        //   2. Vulkan (non-native) -> COPY via onUpdateWindowContentDirect (nativeUpdateWindowContentAHB).
+        //   3. GL renderer / SHM pixmaps -> copyArea (the GPUImage is now CPU-locked + EGLImage-backed,
+        //      so its real pixels are available to the CPU copy / GL texture).
         synchronized (content.renderLock) {
-            content.copyArea((short)0, (short)0, xOff, yOff, pixmap.drawable.width, pixmap.drawable.height, pixmap.drawable);
-            sendIdleNotify(window, pixmap, serial, idleFence);
-            sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+            boolean isNative = vr != null && vr.isNativeMode();
+
+            if (isNative && pixmap.drawable.isDirectScanout()) {
+                content.setTexture(pixmap.drawable.getTexture());
+                content.setDirectScanout(true);
+                sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.FLIP, ust, msc);
+                if (window.attributes.isMapped()) vr.onUpdateWindowContent(window);
+                sendIdleNotify(window, pixmap, serial, idleFence);
+            } else if (vr != null && window.attributes.isMapped()
+                    && pixmap.drawable.getTexture() instanceof GPUImage
+                    && ((GPUImage) pixmap.drawable.getTexture()).getHardwareBufferPtr() != 0) {
+                sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+                vr.onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
+                sendIdleNotify(window, pixmap, serial, idleFence);
+            } else {
+                content.copyArea((short)0, (short)0, xOff, yOff, pixmap.drawable.width, pixmap.drawable.height, pixmap.drawable);
+                sendIdleNotify(window, pixmap, serial, idleFence);
+                sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+            }
         }
     }
 
