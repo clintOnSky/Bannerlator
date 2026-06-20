@@ -99,8 +99,35 @@ foreground):**
 - User explicitly chose "full white border visible" over a bigger near-full-bleed (88%) variant.
 
 **Build:** `build-artifacts.yml` run `27853329322` (artifacts-only, label `neonicon`, off `main` @
-`19d62f8`). ⏳ standard APK → `/sdcard/Download/` when green. ⏳ icon device-unconfirmed (note:
-Android caches launcher icons — reboot / clear launcher cache if old clipped icon persists).
+`19d62f8`). ✅ standard APK delivered `/sdcard/Download/Bannerlator-neonicon-standard.apk` (md5
+`13056a0e2845f56ca34b00405abd3afb`). ⏳ icon device-unconfirmed (note: Android caches launcher icons
+— reboot / clear launcher cache if old clipped icon persists).
+
+---
+
+## 2026-06-19 (PM) — 🏁 RELEASE 1.2 + README features/download button
+
+**Released Bannerlator 1.2** (`release.yml`, run `27853787348`): tag `1.2`, marked **Latest**,
+non-prerelease, 3 flavor APKs attached. Standard APK → `/sdcard/Download/Bannerlator-1.2-standard.apk`
+(md5 `e5d5689ecf4b9b1a91596d70658a752f`). `release.yml` inputs = `release_tag` / `release_title` /
+`release_number` / `release_notes` (publishes `make_latest:true`, supersedes 1.1).
+
+1.2 changelog (commits since `1.1` tag): Vulkan/DXVK/vkd3d black-screen fix (`7d5c9f8` + lead-ups
+`b7d4f3a`/`c4d252c`), Native Rendering+ toggle wired (`779967a`), HUD-freeze fix on FLIP path
+(`f724ec2`), GL-only effects greyed out on Vulkan (`ba06bc3`/`df3a5c7`), DXVK/VKD3D/Vegas version-list
+refresh (`00a2544`), new neon icon (`19d62f8`).
+
+**Splash version** bumped `V 1.1` → `V 1.2` (`SplashScreen.kt:164`, commit `a598584`) BEFORE the
+release so it shipped in 1.2.
+
+**README** (commits `ae5d9b7` + `18eab3d`): added **✨ Full Features** section (7 grouped categories —
+Windows compat / graphics layers / renderers / containers / games+input / UI+overlay / builds; every
+item cross-checked against actual code, NO invented features like AI frame-gen which isn't in this
+app); bumped Information-table version V 1.0→V 1.2; added a centered shields.io **Download button**
+linking to `/releases/latest` + a "Download" entry in the nav row.
+
+**Next:** device-confirm HUD-tick + new icon on 1.2; cleanup graphicsDriverConfig's 2 competing
+dialog formats.
 
 ---
 
