@@ -12,11 +12,81 @@ index 032a00e..d2879fa 100644
          }
      }
  }
+diff --git a/src/framegen_context.cpp b/src/framegen_context.cpp
+index 27e2f58..11781ac 100644
+--- a/src/framegen_context.cpp
++++ b/src/framegen_context.cpp
+@@ -188,6 +188,7 @@ static Pass makeModel1Pass(const vk::Device& dev,
+ 
+ #ifdef __ANDROID__
+ std::unique_ptr<FramegenContext> FramegenContext::create(
++        const vk::Device& device,
+         AHardwareBuffer* prevAhb, AHardwareBuffer* currAhb,
+         const std::vector<AHardwareBuffer*>& outputAhbs,
+         VkExtent2D extent, VkFormat format, const Config& cfg) {
+@@ -210,7 +211,13 @@ std::unique_ptr<FramegenContext> FramegenContext::create(
+             BFG_LOGI("model=1 requested: using traced 100-dispatch graph (shader_03, 30..53, final 04), not model-0 hybrid fallback");
+         }
+ 
+-        ctx->device_        = vk::Device::create();
++        // Single-device mode: adopt the application's device (not owned) instead
++        // of spinning up a standalone instance/device. All vk:: helpers call
++        // global vkXxx routed by handle, and the layer hooks none of the
++        // functions they use, so they operate on the app device with no
++        // recursion — and the AHB producer/consumer are now one device, so the
++        // sync that previously deadlocked across two devices resolves.
++        ctx->device_        = device;
+         ctx->cmdPool_       = vk::CommandPool(ctx->device_);
+         ctx->linearSampler_ = vk::Sampler(ctx->device_, VK_FILTER_LINEAR,
+                                            VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER);
+diff --git a/src/framegen_context.hpp b/src/framegen_context.hpp
+index 7175d1f..492a024 100644
+--- a/src/framegen_context.hpp
++++ b/src/framegen_context.hpp
+@@ -56,7 +56,12 @@ public:
+     FramegenContext() = default;
+ 
+ #ifdef __ANDROID__
++    // `device` is the application's own VkDevice (wrapped, not owned). Running
++    // the interpolation on the SAME device the swapchain/AHBs live on avoids the
++    // cross-device fence deadlock that hangs a standalone second device on
++    // wrapper-ICD stacks (Winlator/Turnip). See BIONIC_FG_INTEGRATION_REPORT.md.
+     static std::unique_ptr<FramegenContext> create(
++        const vk::Device& device,
+         AHardwareBuffer* prevAhb,
+         AHardwareBuffer* currAhb,
+         const std::vector<AHardwareBuffer*>& outputAhbs,
+diff --git a/src/jni_bridge.cpp b/src/jni_bridge.cpp
+index b7f3e03..e5fa182 100644
+--- a/src/jni_bridge.cpp
++++ b/src/jni_bridge.cpp
+@@ -136,7 +136,10 @@ Java_io_github_bionicfg_BionicFGNative_nativeCreateContext(
+     extent.width  = static_cast<uint32_t>(width);
+     extent.height = static_cast<uint32_t>(height);
+ 
++    // Standalone JNI test path: create our own device (owned). The Vulkan-layer
++    // path instead passes the application's wrapped device (single-device mode).
+     auto ctx = bionic_fg::FramegenContext::create(
++        bionic_fg::vk::Device::create(),
+         prevBuf, currBuf, outBufs, extent, VK_FORMAT_R8G8B8A8_UNORM, cfg);
+     if (!ctx) { BFG_LOGE("nativeCreateContext: FramegenContext::create failed"); return 0L; }
+     return bionic_fg::ctxToHandle(ctx.release());
 diff --git a/src/vk_layer/layer.cpp b/src/vk_layer/layer.cpp
-index 66d1934..ff5d59c 100644
+index 66d1934..ad13f8f 100644
 --- a/src/vk_layer/layer.cpp
 +++ b/src/vk_layer/layer.cpp
-@@ -415,6 +415,7 @@ struct SwapState {
+@@ -388,6 +388,10 @@ static void freeExtImage(const DeviceData& dd, VkDevice device, ExtImage& img) {
+ 
+ struct SwapState {
+     VkDevice   device = VK_NULL_HANDLE;
++    // App-device handles for single-device framegen (wrapped, not owned).
++    VkInstance       instance     = VK_NULL_HANDLE;
++    VkPhysicalDevice physical     = VK_NULL_HANDLE;
++    VkQueue          computeQueue = VK_NULL_HANDLE;
+     VkExtent2D extent = {};
+     VkFormat   format = VK_FORMAT_UNDEFINED;
+     std::vector<VkImage> images;
+@@ -415,6 +419,7 @@ struct SwapState {
  
      uint64_t frameCount = 0;
      bool     inPresent  = false;
@@ -24,7 +94,35 @@ index 66d1934..ff5d59c 100644
  
      void cleanup(const DeviceData& dd, VkDevice dev) {
          if (dd.deviceWaitIdle) dd.deviceWaitIdle(dev);
-@@ -1031,6 +1032,27 @@ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
+@@ -455,7 +460,12 @@ static std::unique_ptr<bionic_fg::FramegenContext> createFramegenContext(
+         const SwapState& st,
+         const LayerConf& conf) {
+     DisableLayerEnvGuard disableLayerForInternalVulkan;
++    // Wrap the application's own device (not owned) so interpolation runs on the
++    // same device as the swapchain/AHBs — single-device mode.
++    bionic_fg::vk::Device appDevice = bionic_fg::vk::Device::wrap(
++        st.instance, st.physical, st.device, st.copyQueueFamily, st.computeQueue);
+     return bionic_fg::FramegenContext::create(
++        appDevice,
+         st.prevAhb,
+         st.currAhb,
+         st.outAhbs,
+@@ -897,6 +907,14 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_CreateSwapchainKHR(
+         cpci.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+         dd.createCmdPool(device, &cpci, nullptr, &st.copyPool);
+ 
++        // App-device handles for single-device framegen. Reuse the same queue the
++        // copy path submits to (the present/graphics queue) so all framegen work
++        // is ordered on one queue from the present thread.
++        st.instance = dd.instance;
++        st.physical = dd.physical;
++        if (dd.getDeviceQueue)
++            dd.getDeviceQueue(device, dd.queueFamilyIdx, 0, &st.computeQueue);
++
+         VkCommandBufferAllocateInfo cbai{};
+         cbai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+         cbai.commandPool        = st.copyPool;
+@@ -1031,6 +1049,27 @@ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
  
  // ─── QueuePresentKHR ──────────────────────────────────────────────────────────
  
@@ -52,7 +150,7 @@ index 66d1934..ff5d59c 100644
  VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          VkQueue queue,
          const VkPresentInfoKHR* pPresentInfo) {
-@@ -1155,8 +1177,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1155,8 +1194,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
      // --- Step 1: Copy real swapchain image into current AHB input. The copy
      // waits on the application's original present semaphores, so the final real
      // present must not wait on those same binary semaphores again.
@@ -68,7 +166,7 @@ index 66d1934..ff5d59c 100644
          BFG_LAYER_E("copy fence wait/reset failed; passing through");
          return callNextPresent(queue, pPresentInfo);
      }
-@@ -1234,11 +1261,17 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1234,11 +1278,17 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          finalPresent.pWaitSemaphores = nullptr;
      }
  
@@ -88,7 +186,7 @@ index 66d1934..ff5d59c 100644
  
      // --- Step 2: Run framegen after we have both previous and current inputs.
      if (st.frameCount > 0) {
-@@ -1267,7 +1300,11 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1267,7 +1317,11 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
                  continue;
              }
  
