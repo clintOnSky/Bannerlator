@@ -108,10 +108,12 @@ copy its proven placement rather than rediscover it.
 
 ## 6. Job task list
 
-### Phase 0 — Honor author terms (do first, low risk)
-- [ ] **0.1** Add `bionic-fg` as a **git submodule** under `app/src/main/cpp/bionic-fg` → his repo.
-- [ ] **0.2** Verify CI still checks out clean (workflows already use `submodules: recursive`).
-- [ ] **0.3** **Credit** xXJSONDeruloXx / bionic-fg in the README Credits table + upstream-stack table.
+### Phase 0 — Honor author terms (do first, low risk) — ✅ DONE
+- [x] **0.1** Add `bionic-fg` as a **git submodule** under `app/src/main/cpp/bionic-fg` → his repo.
+      (Pinned at `4f71770`; `.gitmodules` created.)
+- [x] **0.2** Verify CI still checks out clean (workflows already use `submodules: recursive`).
+- [x] **0.3** **Credit** xXJSONDeruloXx / bionic-fg in the README Credits table + upstream-stack table.
+- ⚠️ Submodule still has **no LICENSE** — carry to Phase 5.2 (ask author before any release).
 
 ### Phase 1 — Native build
 - [ ] **1.1** Wire bionic-fg into the NDK build for `arm64-v8a` (subdir or standalone workflow like

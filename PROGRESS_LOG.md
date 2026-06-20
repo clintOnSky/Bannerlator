@@ -167,6 +167,17 @@ build → 2 spike/de-risk → 3 container setting → 4 in-game menu → 5 polis
 **Next on branch:** Phase 0 — add bionic-fg as a submodule under `app/src/main/cpp/bionic-fg` +
 README credit; then the Phase 2 verification spike (gate the rest on it).
 
+### ✅ Phase 0 DONE (2026-06-19) — author terms honored
+- Added **bionic-fg as a git submodule** at `app/src/main/cpp/bionic-fg` (his preference), pinned at
+  `4f71770`; new root `.gitmodules`. CI needs no change (all 3 workflows already `submodules: recursive`).
+- **README credit**: added xXJSONDeruloXx / bionic-fg to the Credits table (frame-generation layer,
+  in-tree as a submodule with permission) + a "Frame Generation (bionic-fg)" row in the upstream-stack
+  table.
+- ⚠️ Submodule has **no LICENSE** → carry to Phase 5.2 (ask author before bundling in a release).
+- **Next:** Phase 2 verification spike — build `libbionic_fg.so`, hand-wire one container's env +
+  `conf.toml`, launch a DXVK game, confirm via logcat whether the layer engages (wrapper exposes a
+  `VkSwapchainKHR`?) BEFORE any UI work.
+
 ---
 
 ## How to Resume a Session
