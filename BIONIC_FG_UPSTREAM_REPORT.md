@@ -1,7 +1,8 @@
 # bionic-fg on Android wrapper ICDs (Winlator/Turnip): investigation + fix
 
-Internal record of the work behind our upstream PR to **xXJSONDeruloXx/bionic-fg**
-(PR: *Single-device mode + layer-dispatch routing — make bionic-fg work on Android wrapper ICDs*).
+Internal record of the work behind our upstream PR to **xXJSONDeruloXx/bionic-fg**:
+**https://github.com/xXJSONDeruloXx/bionic-fg/pull/6** — *Single-device mode + layer-dispatch
+routing: make bionic-fg work on Android wrapper ICDs (Winlator/Turnip)*.
 
 Context: integrating bionic-fg into **Bannerlator** (a Winlator-lineage Android app — Wine +
 box64/arm64ec + DXVK, presenting through a **wrapper ICD → Turnip (Mesa) via adrenotools**). The
