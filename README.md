@@ -36,9 +36,60 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.star` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 1.0** — built from Star **marcescence** (`versionName 1.4-marcescene`, `versionCode 20`) |
+| **Version** | Bannerlator **V 1.2** — built from Star **marcescence** (`versionName 1.4-marcescene`, `versionCode 20`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
+
+---
+
+## ✨ Full Features
+
+Everything Bannerlator offers, at a glance. No PC and no root required — it runs Windows apps and games directly on your Android device.
+
+### 🍷 Windows compatibility
+- **Wine** Windows compatibility layer — run native Win32/Win64 applications and games.
+- **Box64 / Box86** x86 & x86-64 → ARM translation, with selectable performance presets.
+- **WOWBox64** for arm64ec containers (correctly labelled per container).
+- **FEXCore** as an alternative x86/x64 emulation backend.
+- **arm64ec** and **x64** container support.
+
+### 🎨 Graphics & translation layers
+- **DXVK** — DirectX 8 / 9 / 10 / 11 → Vulkan (with GPLAsync and Sarek variants).
+- **VKD3D-Proton** — DirectX 12 → Vulkan.
+- **WineD3D / DirectDraw** OpenGL fallback paths for older titles.
+- **Proton bionic** translation layers (via GameNative).
+- **VEGAS** — Adreno-optimized DXVK for reduced stutter and real-time upscaling on mobile GPUs.
+- **Turnip / Mesa** open-source Adreno Vulkan drivers, with Timeline Semaphore patches for newer DXVK; bundled and downloadable driver options.
+
+### 🖥️ Renderers
+- Multiple host renderers — **Vulkan**, **OpenGL**, and **VirGL**.
+- **Native Rendering+** — low-latency direct-scanout presentation on the Vulkan renderer.
+- **Screen effects** on the OpenGL renderer — FXAA, SGSR, HDR, CRT, Toon, and NTSC.
+- Adjustable resolution and frame-rate limit.
+
+### 📦 Containers
+- Create and manage **multiple isolated Wine containers**.
+- **Import / export** containers to move or back up setups.
+- Per-container control of Wine version, graphics driver, DXVK / VKD3D version, Box64 preset, drive mappings, Z-drive selector, and environment variables.
+- **One-tap component downloads** (Wine, DXVK, VKD3D, Box64, VEGAS) with on-card download & install progress.
+
+### 🕹️ Games, shortcuts & input
+- **Game library** with grid or list layout, sorting, and installed/updated filters.
+- Add shortcuts from external storage.
+- **SteamGridDB** cover-art scraping.
+- Per-game settings including display language / locale.
+- **Customizable on-screen touch controls** and virtual gamepad overlays.
+- **Physical controller** support (SDL2), plus touchpad / mouse emulation with adjustable cursor speed.
+
+### 🎛️ Interface & in-game overlay
+- Modern **Jetpack Compose** user interface.
+- In-game overlay drawer for settings, input, and quick toggles.
+- **Performance HUD** — FPS, frame time, CPU/GPU temperature, and RAM, in vertical or horizontal layout.
+- **Customizable themes** — 8 presets plus an HSV colour picker, with dark mode.
+
+### 📥 Builds & distribution
+- **Three build flavors** with distinct package IDs — *standard*, *PuBG*, and *Ludashi*.
+- Continuous **GitHub Actions** action builds and tagged stable releases.
 
 ---
 
