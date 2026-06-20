@@ -90,10 +90,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var fpsCounterConfig by mutableStateOf(Container.DEFAULT_FPS_COUNTER_CONFIG)
     var fullscreenStretched by mutableStateOf(false)
 
-    // bionic-fg frame generation (per-container)
+    // bionic-fg frame generation (per-container). Only the on/off lives here;
+    // multiplier & flow scale are tuned live from the in-game side menu.
     var frameGenEnabled by mutableStateOf(false)
-    var frameGenMultiplier by mutableStateOf(Container.FRAMEGEN_DEFAULT_MULTIPLIER)
-    val frameGenMultiplierOptions = listOf(2, 3, 4)
+    // FPS limiter on/off (loads the layer); the cap value is set live in-game.
+    var fpsLimiterEnabled by mutableStateOf(false)
 
     // ── Renderer ──────────────────────────────────────────────────────────────
     var rendererEntries by mutableStateOf(emptyList<String>()); private set
@@ -292,7 +293,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         fullscreenStretched = c?.isFullscreenStretched == true
 
         frameGenEnabled    = c?.isFrameGenEnabled == true
-        frameGenMultiplier = c?.frameGenMultiplier ?: Container.FRAMEGEN_DEFAULT_MULTIPLIER
+        fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
 
         // Renderer
         selectedRenderer = c?.renderer ?: "opengl"
@@ -554,7 +555,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFPSCounterConfig(fpsConfig)
             c.setFullscreenStretched(fullscreenStretched)
             c.setFrameGenEnabled(frameGenEnabled)
-            c.setFrameGenMultiplier(frameGenMultiplier)
+            c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setExclusiveXInput(exclusiveXInput)
             c.setRenderer(StringUtils.parseIdentifier(selectedRenderer))
             c.setInputType(inputType)
@@ -610,7 +611,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 container = created
                 if (created != null) {
                     created.setFrameGenEnabled(frameGenEnabled)
-                    created.setFrameGenMultiplier(frameGenMultiplier)
+                    created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.saveData()
                     saveMouseWarp(created)
                 }

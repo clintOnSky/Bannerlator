@@ -490,6 +490,63 @@ private fun GraphicsContent(state: XServerDrawerState) {
 
     val nativeRenderingEnabled by state.nativeRenderingEnabled.collectAsState()
     ToggleRow("Native Rendering", nativeRenderingEnabled) { state.onNativeRenderingToggle?.run() }
+
+    HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+
+    // Frame Generation (bionic-fg). On/off is per-container; multiplier & flow scale are
+    // tuned live here and hot-reload via conf.toml.
+    val frameGenEnabled by state.frameGenEnabled.collectAsState()
+    val initFgMult by state.frameGenMultiplier.collectAsState()
+    val initFgFlow by state.frameGenFlowScale.collectAsState()
+
+    Text("Frame Generation (AI)", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(4.dp))
+
+    if (frameGenEnabled) {
+        var fgMult by remember(initFgMult) { mutableIntStateOf(initFgMult) }
+        var fgFlow by remember(initFgFlow) { mutableFloatStateOf(initFgFlow) }
+        fun applyFg() {
+            state.setFrameGenMultiplier(fgMult)
+            state.setFrameGenFlowScale(fgFlow)
+            state.onBionicFgConfigChange?.run()
+        }
+
+        // Multiplier control is Off / 2× / 3× / 4× (mult 0/2/3/4). Slider position 0..3 maps to
+        // the multiplier; Off (0) hot-reloads the layer to pure passthrough.
+        LabeledSlider(
+            "Multiplier", multToPos(fgMult).toFloat(), 0f..3f,
+            { fgMult = posToMult(it.roundToInt()) }, { applyFg() },
+            steps = 2, format = { fgMultLabel(it.roundToInt()) }
+        )
+        LabeledSlider(
+            "Flow Scale", fgFlow, 0.2f..1.0f,
+            { fgFlow = it }, { applyFg() },
+            format = { "%.2f".format(it) }
+        )
+        Text(
+            "Higher flow scale = smoother motion estimate, more GPU cost.",
+            color = DimWhite.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+    } else {
+        Text(
+            "Enable Frame Generation in this container's settings to tune it here.",
+            color = DimWhite.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+    }
+}
+
+// Frame-gen multiplier <-> slider-position helpers. Position 0 = Off, 1..3 = 2×..4×.
+private fun posToMult(pos: Int): Int = if (pos <= 0) 0 else (pos + 1).coerceAtMost(4)
+private fun multToPos(mult: Int): Int = if (mult <= 0) 0 else (mult - 1).coerceIn(1, 3)
+private fun fgMultLabel(pos: Int): String = when (pos.coerceIn(0, 3)) {
+    0 -> "Off"
+    1 -> "2×"
+    2 -> "3×"
+    else -> "4×"
 }
 
 private fun pushSgsrUpdate(enabled: Boolean, sharpness: Int, hdr: Boolean) {
@@ -552,6 +609,41 @@ private fun HudContent(state: XServerDrawerState) {
     val fpsConfig by state.fpsConfig.collectAsState()
 
     SectionHeader("HUD")
+
+    // ── FPS Limiter (bionic-fg base-frame cap; with frame gen on, on-screen = limit × multiplier) ──
+    val fpsLimiterEnabled by state.fpsLimiterEnabled.collectAsState()
+    val initFpsLimit by state.fpsLimit.collectAsState()
+    val bionicFgActive by state.bionicFgActive.collectAsState()
+
+    Text("FPS Limiter", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(4.dp))
+
+    var limiterOn by remember(fpsLimiterEnabled) { mutableStateOf(fpsLimiterEnabled) }
+    var limitVal by remember(initFpsLimit) { mutableIntStateOf(initFpsLimit) }
+    fun applyLimiter() {
+        state.setFpsLimiterEnabled(limiterOn)
+        state.setFpsLimit(limitVal)
+        state.onBionicFgConfigChange?.run()
+    }
+
+    ToggleRow("Limit FPS", limiterOn, enabled = bionicFgActive) { limiterOn = it; applyLimiter() }
+    if (limiterOn && bionicFgActive) {
+        LabeledSlider(
+            "Max FPS", limitVal.toFloat(), 10f..200f,
+            { limitVal = it.roundToInt() }, { applyLimiter() },
+            format = { "${it.roundToInt()}" }
+        )
+    }
+    if (!bionicFgActive) {
+        Text(
+            "Enable Frame Generation or the FPS limiter in this container's settings (then relaunch) to use this.",
+            color = DimWhite.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+    }
+
+    HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
     fun parseConfig(s: String): Map<String, String> {
         if (s.isEmpty()) return emptyMap()

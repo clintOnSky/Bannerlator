@@ -537,7 +537,8 @@ private fun TopLevelFields(
             Text(stringResource(R.string.fullscreen_stretched))
         }
 
-        // Frame Generation (bionic-fg)
+        // Frame Generation (bionic-fg) — just the on/off here; multiplier & flow scale
+        // are tuned live from the in-game side menu (they hot-reload).
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(
                 checked = viewModel.frameGenEnabled,
@@ -547,16 +548,32 @@ private fun TopLevelFields(
             Text(stringResource(R.string.frame_generation), modifier = Modifier.weight(1f))
         }
         if (viewModel.frameGenEnabled) {
-            LabeledDropdown(
-                label = stringResource(R.string.frame_generation_multiplier),
-                options = viewModel.frameGenMultiplierOptions.map { "${it}x" },
-                selectedOption = "${viewModel.frameGenMultiplier}x",
-                onSelect = { opt ->
-                    viewModel.frameGenMultiplier =
-                        opt.removeSuffix("x").toIntOrNull() ?: Container.FRAMEGEN_DEFAULT_MULTIPLIER
-                }
+            Text(
+                text = stringResource(R.string.frame_generation_ingame_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
             )
-            Spacer(Modifier.height(8.dp))
+        }
+
+        // FPS Limiter (bionic-fg). This switch just loads the layer; the cap value is set live
+        // from the in-game FPS menu. (Frame Generation also loads the layer, so this is only
+        // needed if you want a cap without frame gen.)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = viewModel.fpsLimiterEnabled,
+                onCheckedChange = { viewModel.fpsLimiterEnabled = it }
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
+        }
+        if (viewModel.fpsLimiterEnabled) {
+            Text(
+                text = stringResource(R.string.fps_limiter_ingame_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+            )
         }
 
         // LC_ALL
