@@ -47,6 +47,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.BuildConfig
 import com.winlator.star.R
 import androidx.compose.runtime.withFrameMillis
 import kotlin.math.PI
@@ -161,7 +162,7 @@ fun SplashScreen(
             Spacer(Modifier.height(12.dp))
 
             Text(
-                text = "V 1.4",
+                text = "V ${BuildConfig.VERSION_NAME}",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color(0xFFAAAAAA),

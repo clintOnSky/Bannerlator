@@ -426,7 +426,9 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                     color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "V 1.3",
+                    // Read from BuildConfig so it tracks the gradle versionName automatically
+                    // and never drifts from the real app version again.
+                    text = "V ${BuildConfig.VERSION_NAME}",
                     fontSize = 13.sp,
                     color = com.winlator.star.ui.theme.OnSurfaceVariant
                 )
