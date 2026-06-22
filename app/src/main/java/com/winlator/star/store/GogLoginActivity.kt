@@ -2,9 +2,16 @@ package com.winlator.star.store
 
 import android.content.SharedPreferences
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Bundle
 import android.util.Log
+import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
+import android.webkit.SslErrorHandler
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -61,8 +68,27 @@ class GogLoginActivity : ComponentActivity() {
                         WebView(this@GogLoginActivity).apply {
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
+                            settings.databaseEnabled = true
+                            // GOG's login form is an iframe served from a different origin
+                            // (login.gog.com / static-login.gog-statics.com) than the page
+                            // host. Android WebView blocks third-party cookies by default,
+                            // which leaves that iframe unable to establish its session -> the
+                            // page loads but renders blank (the "white screen"). Allow cookies
+                            // (incl. third-party for this WebView) so the form can initialize.
+                            CookieManager.getInstance().setAcceptCookie(true)
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                            settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                             settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GOG Galaxy/2.0"
                             webViewClient = GogWebViewClient()
+                            webChromeClient = object : WebChromeClient() {
+                                override fun onConsoleMessage(cm: ConsoleMessage): Boolean {
+                                    Log.d(TAG, "console[${cm.messageLevel()}] ${cm.message()} @${cm.sourceId()}:${cm.lineNumber()}")
+                                    return true
+                                }
+                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                    Log.d(TAG, "progress=$newProgress")
+                                }
+                            }
                             loadUrl(AUTH_URL)
                             webViewRef = this
                         }
@@ -74,6 +100,28 @@ class GogLoginActivity : ComponentActivity() {
     }
 
     private inner class GogWebViewClient : WebViewClient() {
+
+        override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+            Log.d(TAG, "pageStarted: $url")
+        }
+
+        override fun onPageFinished(view: WebView?, url: String?) {
+            Log.d(TAG, "pageFinished: $url")
+        }
+
+        override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+            Log.e(TAG, "recvError: ${error?.errorCode} ${error?.description} url=${request?.url} mainFrame=${request?.isForMainFrame}")
+        }
+
+        override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
+            Log.e(TAG, "recvHttpError: ${errorResponse?.statusCode} ${errorResponse?.reasonPhrase} url=${request?.url} mainFrame=${request?.isForMainFrame}")
+        }
+
+        override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+            Log.e(TAG, "recvSslError: $error")
+            // Do NOT proceed() — a real cert error should surface, not be silently bypassed.
+            handler?.cancel()
+        }
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val uri = request.url
