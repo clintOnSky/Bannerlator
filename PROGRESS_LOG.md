@@ -15,6 +15,52 @@ gh workflow run "Any branch compilation." --repo The412Banner/star-compose --ref
 
 ---
 
+## 2026-06-22 — lsfg-vk live reload CONFIRMED ✅ + Off→passthrough fix + engine badge + Task-Manager-on-Vulkan bug (diagnosing)
+
+Session driven by live device questions ("which FG engine is running right now?").
+
+**1. lsfg-vk 3× + LIVE RELOAD confirmed working (supersedes the 2026-06-21 "no live reload" finding).**
+Probed the running game (`DOOMBLADE.exe`) on device: `liblsfg-vk.so` mapped into the game proc, env
+`ENABLE_LSFG=1` / `LSFG_PROCESS=bannerlator-lsfg` / `LSFG_CONFIG=…/home/xuser/.config/lsfg-vk/conf.toml`,
+`Lossless.dll` present. Logcat showed `lsfg-vk: Rereading configuration, as it is no longer valid.` →
+`Reloaded configuration … Multiplier: 3` → `lsfg-vk-framegen: Entering Device::Device` — i.e. the
+mtime-watch → OUT_OF_DATE → swapchain-recreate reload mechanism (GameNative fork `.so`) DOES fire on our
+DXVK→vkd3d→wrapper_icd→Turnip stack now. Panel present rate ~138–143 fps on a 144 Hz panel = base ~46 × 3.
+DXVK HUD correctly shows the BASE rate (~46) because lsfg-vk inserts frames downstream of DXVK's counter
+(HUD≠panel is expected, and is itself proof FG works). Two conf.toml files exist: live
+`home/xuser/.config/lsfg-vk/conf.toml` (read by the layer) and a stale `home/xuser-1/.config/bionic-fg/conf.toml`
+(ignored by lsfg; its `fps_limit` field isn't an lsfg option). Minor cleanup candidate.
+
+**2. Off-bug found + fixed.** Installed APK (`7f7ffb5`) predated the Off fix (`80e238a`), so in-game "Off"
+wrote `multiplier = 2` (`Math.max(2,0)`) → still 2× frame gen. `80e238a` writes `1` (true passthrough).
+Built off-fix APK (run `27941385132`, label `1.3-lsfg-offfix`, ✅ green). PROVEN on device by live-editing
+the running conf.toml `multiplier 2→1`: reload fired (`Rereading` → `Multiplier: 1`), FPS dropped to native
+~21–27. So `multiplier=1` = genuine off.
+
+**3. Engine badge in in-game FG drawer (commit `740e779`).** Per user, replaced the standalone
+"Frame Generation (AI)" header with a title + engine badge row — `Frame Generation  [● bionic-fg]` (green
+dot = layer running this session; swaps to `lsfg-vk`; "Off" when disabled). No double labeling (user picked
+the "Engine badge" layout). Plumbed `XServerDrawerState.frameGenEngine` ← `container.getFrameGenEngine()`,
+wired in `XServerDisplayActivity` next to the other FG drawer-state setters.
+
+**4. Task Manager reports nothing on the Vulkan host renderer (SAME container works on OpenGL). Diagnosing.**
+Game runs fine; `winhandler.exe` (the process-list backend) is alive; no app crash. The new off-fix build's
+Task Manager refreshes on a render-independent 1s timer and STILL shows empty on Vulkan → ruled out the
+UI-tick/copyArea theory. `setupTmCallbacks`/listener registration are NOT renderer-conditional in source, so
+nothing intends to disable it on Vulkan. Added WinHandler diagnostic logging (commit `e75d1d4`, tag
+`WinHandlerTM`): logs INIT handshake, each `listProcesses` send + sendPacket result, every received request
+code, and `GET_PROCESS` replies. One Vulkan run with Task Manager open will split it: `GET_PROCESS` arriving
+but UI empty → Compose/StateFlow update problem on Vulkan; no `recv` at all → guest not replying / INIT never
+happened. NOT yet root-caused.
+
+**Builds:** off-fix `27941385132` (`1.3-lsfg-offfix`) ✅; logging-only `27943043968` (`1.3-tmlog`) ✅;
+combined `27943884565` (`1.3-tmlog-badge` = off-fix + WinHandler logging + engine badge) — in progress.
+Branch `feature/lsfg-vk-engine` tip `740e779`, pushed, NOT merged.
+**NEXT:** deliver combined APK to `/sdcard/Download` + arm `WinHandlerTM` logcat → user opens Task Manager on
+Vulkan once → read logs to root-cause → fix → merge to main.
+
+---
+
 ## 2026-06-21 (night) — lsfg-vk DEVICE TEST: works (2×) but live in-game reload does NOT on our stack ⏸️ RESUME
 
 Installed the test APK (`Bannerlator-1.3-lsfg-vk-standard.apk`, testkey, updates over current), imported a
