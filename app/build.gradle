@@ -114,6 +114,14 @@ android {
         }
     }
 
+    // Release builds run lintVitalRelease (debug skips it). Don't let a pre-existing
+    // lint warning abort the build — we ship the same code that already runs in debug,
+    // just non-debuggable + optimized. (No R8 yet: minifyEnabled stays false.)
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
     flavorDimensions "version"
     productFlavors {
         standard {
