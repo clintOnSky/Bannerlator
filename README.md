@@ -49,9 +49,18 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 1.4** — built from Star **marcescence** (`versionName 1.4`, `versionCode 22`) |
+| **Version** | Bannerlator **V 1.5** — built from Star **marcescence** (`versionName 1.5`, `versionCode 23`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
+
+---
+
+## 🆕 What's New in 1.5
+
+- **Optimized release builds.** Every build now ships as an **optimized release build** instead of a debug build. Debug Compose runs many times slower than release, so the previous builds felt sluggish; the Jetpack Compose UI is now noticeably smoother. Builds are still AOSP-testkey signed, so updates install over previous installs without an uninstall.
+- **GOG store sign-in fixed.** The GOG store login no longer shows a blank white screen — the OAuth login now completes correctly so you can sign in and access your GOG library.
+- **New bundled Start-menu utilities** in fresh containers — **AIO Graphics Test** and **Game Controller Test** — alongside the bundled **Winlator File Manager (WFM)**, with `.lnk` working-directory ("Start in") support so folder-locked apps launch correctly.
+- **WFM drive icons fixed.** The bundled Winlator File Manager now shows the correct **"Local Disk"** icon for drives instead of a generic document icon.
 
 ---
 
@@ -104,6 +113,15 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - **Customizable on-screen touch controls** and virtual gamepad overlays.
 - **Physical controller** support (SDL2), plus touchpad / mouse emulation with adjustable cursor speed.
 
+### 🛒 Built-in GOG store
+- **Sign in with your [GOG](https://www.gog.com/) account** and browse your owned library directly in-app.
+- **Download and install** your GOG games, with **cloud-save** sync and one-tap launch into a container.
+- DRM-free titles only — Bannerlator does not bundle or circumvent any DRM; you install games you already own.
+
+### 🧰 Bundled Start-menu utilities
+- New containers ship with handy Windows tools in the Start menu — **Winlator File Manager (WFM)**, **AIO Graphics Test**, and **Game Controller Test**.
+- **`.lnk` working-directory ("Start in") support** so shortcuts for apps that only run from their own folder launch correctly.
+
 ### 🎛️ Interface & in-game overlay
 - Modern **Jetpack Compose** user interface.
 - In-game overlay drawer for settings, input, and quick toggles.
@@ -112,6 +130,7 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 
 ### 📥 Builds & distribution
 - **Three build flavors** with distinct package IDs — *standard*, *PuBG*, and *Ludashi*.
+- **Optimized release builds** (not debug) for a smoother Compose UI, AOSP-testkey signed so updates install over previous installs.
 - Continuous **GitHub Actions** action builds and tagged stable releases.
 
 ---
@@ -144,7 +163,7 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **Star / Frost dev team** | The [star-emu](https://github.com/star-emu) team behind the original *Star Bionic* and *Winlator Frost* lines this build continues from. |
 | **isygold** (AGBOOLA Israel Oluwagbogo) | [Star Engine / VEGAS](https://github.com/isygold/vegas-releases) — the Adreno-optimized DXVK fork this build's `v1.3-vegas` is named for, eliminating stutter and adding real-time upscaling on mobile GPUs, plus tuned [dxvk.conf profiles](https://github.com/isygold/DXVK.CONF-FILE-SETTINGS-). |
 | **vivsi** | Controller support contributions. |
-| **StevenMXZ** | [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) and extensive cherry-picked work implemented in this build. This includes the **new user interface** and the **Vulkan rendering** path — both of which were **still unreleased and unfinished at the time these builds and this repo were created** — along with various other cherry-picked commits. This work is set to be released properly in his upcoming **3.1**. |
+| **StevenMXZ** | [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) and extensive cherry-picked work implemented in this build. This includes the **new user interface** and the **Vulkan rendering** path — both of which were **still unreleased and unfinished at the time these builds and this repo were created** — along with various other cherry-picked commits. This work is set to be released properly in his upcoming **3.1**. The bundled **Winlator File Manager (`wfm.exe`)** — including its correct "Local Disk" drive-icon behaviour — is from StevenMXZ's **Winlator-Ludashi 3.1 hotfix** release. |
 | **GameNative** | [GameNative](https://github.com/utkarshdalal/GameNative) by **utkarshdalal** — Proton bionic translation layers and cherry-picked commits adapted into this build. Its rendering pipeline was also the **reference used to fix and rewire Bannerlator's render options** — the `AHardwareBuffer` present path that makes Vulkan / DXVK / VKD3D content render correctly on both the OpenGL and Vulkan host renderers (GPUImage socket-buffer locking + EGLImage sampling, DRI3 direct-scanout, the Present extension's FLIP / COPY branches, and the Native Rendering+ direct-scanout path) was ported from and cross-examined against GameNative's implementation. |
 | **xXJSONDeruloXx** | [bionic-fg](https://github.com/xXJSONDeruloXx/bionic-fg) — the Android/bionic Vulkan **frame-generation** layer powering Bannerlator's Frame Generation feature. Included in-tree as a git submodule with the author's permission. |
 | **PancakeTAS** | [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk) — the open-source Vulkan frame-generation layer (a Vulkan-layer reimplementation of Lossless Scaling's frame generation) that Bannerlator's **second, user-selectable FG engine** is built on. |
