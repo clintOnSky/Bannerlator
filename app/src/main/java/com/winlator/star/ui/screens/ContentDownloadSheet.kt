@@ -50,6 +50,7 @@ import java.util.concurrent.Executors
  * After install/remove, calls [onContentChanged] so the parent can refresh version lists.
  * [inUseKey] (optional) marks the version the container currently uses (matched best-effort).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContentDownloadSheet(
     contentTypes: List<ContentProfile.ContentType>,
@@ -154,14 +155,15 @@ fun ContentDownloadSheet(
         )
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            color = Color.Black,
-            shape = RoundedCornerShape(16.dp),
-            border = BorderStroke(1.dp, Color(0xFF555555)),
-            tonalElevation = 0.dp,
-        ) {
-            Column(modifier = Modifier.padding(top = 20.dp, bottom = 12.dp)) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        run {
+            Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
                 val multiType = contentTypes.size > 1
                 // Title + "install from file"
                 Row(
@@ -170,7 +172,7 @@ fun ContentDownloadSheet(
                 ) {
                     Text(
                         if (multiType) "Compatibility Layer" else "${contentTypes.first()} Downloads",
-                        color = Color.White, style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
                     if (fileInstalling) {
@@ -307,16 +309,20 @@ private fun DownloadContentItem(
     val busy = isDownloading || isInstalling
     val installedBlue = Color(0xFF4FC3F7)
     val cs = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+    // Whole row is tappable to download when it's an available (not-installed, not-busy) entry —
+    // matches the adrenotools EntryRow behaviour.
+    val rowClickable = !busy && !isLocal
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(if (rowClickable) Modifier.clickable(onClick = onDownload) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Filled.Memory, contentDescription = null, tint = cs.primary, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    profile.verName,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White,
-                )
+                Text(profile.verName, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
                 val sub = when {
                     isInUse -> "In use"
                     isLocal -> "Installed"
@@ -327,21 +333,24 @@ private fun DownloadContentItem(
                     Text(
                         sub,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isInUse) installedBlue else Color(0xFF9E9E9E),
+                        color = if (isInUse) installedBlue else cs.onSurfaceVariant,
                     )
                 }
             }
             when {
-                busy -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                busy -> {}
                 isLocal -> {
                     Icon(Icons.Filled.CheckCircle, contentDescription = "Installed", tint = installedBlue,
-                        modifier = Modifier.size(22.dp))
-                    IconButton(onClick = onInfo) { Icon(Icons.Filled.Info, "Info", tint = Color(0xFFAAAAAA)) }
-                    IconButton(onClick = onRemove) { Icon(Icons.Filled.Delete, "Remove", tint = Color(0xFFEF5350)) }
+                        modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Icon(Icons.Filled.Info, contentDescription = "Info", tint = cs.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp).clickable(onClick = onInfo))
+                    Spacer(Modifier.width(14.dp))
+                    Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = Color(0xFFEF5350),
+                        modifier = Modifier.size(20.dp).clickable(onClick = onRemove))
                 }
-                else -> IconButton(onClick = onDownload) {
-                    Icon(Icons.Filled.CloudDownload, contentDescription = "Download", tint = cs.primary)
-                }
+                else -> Icon(Icons.Filled.CloudDownload, contentDescription = "Download", tint = cs.primary,
+                    modifier = Modifier.size(22.dp))
             }
         }
         // 0→100 determinate bar for both phases — blue "Downloading", green "Installing".
