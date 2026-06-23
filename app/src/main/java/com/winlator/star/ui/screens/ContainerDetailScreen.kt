@@ -45,7 +45,6 @@ import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GPUInformation
-import com.winlator.star.core.KeyValueSet
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineThemeManager
 import androidx.compose.foundation.lazy.items
@@ -219,8 +218,20 @@ fun ContainerDetailScreen(
 
     if (showVulkanConfig) {
         VulkanSettingsDialog(
-            initialConfig = Container.getDefaultVulkanConfig(),
-            onConfirm = { newConfig -> showVulkanConfig = false },
+            initialConfig = "native=${viewModel.rendererNative}" +
+                ";presentMode=${viewModel.rendererPresentMode}" +
+                ";driverId=${viewModel.rendererDriverId}" +
+                ";filterMode=${viewModel.rendererFilterMode}" +
+                ";swapRB=${viewModel.rendererSwapRB}",
+            onConfirm = { newConfig ->
+                val m = parseVulkanConfig(newConfig)
+                viewModel.rendererNative      = m["native"] == "true"
+                viewModel.rendererPresentMode = m["presentMode"] ?: "fifo"
+                viewModel.rendererDriverId    = m["driverId"] ?: "system"
+                viewModel.rendererFilterMode  = m["filterMode"]?.toIntOrNull() ?: 0
+                viewModel.rendererSwapRB      = m["swapRB"] == "true"
+                showVulkanConfig = false
+            },
             onDismiss = { showVulkanConfig = false }
         )
     }
@@ -277,17 +288,26 @@ fun ContainerDetailScreen(
 
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
+// Parse the semicolon-separated Vulkan settings string ("native=..;presentMode=..;..") into a map.
+private fun parseVulkanConfig(s: String): Map<String, String> =
+    s.split(";").mapNotNull {
+        val i = it.indexOf('=')
+        if (i <= 0) null else it.substring(0, i) to it.substring(i + 1)
+    }.toMap()
+
 internal fun VulkanSettingsDialog(
     initialConfig: String,
     onConfirm: (newConfig: String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val cfg = remember { KeyValueSet(initialConfig) }
-    var nativeRender by remember { mutableStateOf(cfg.getBoolean("native", false)) }
-    var presentMode by remember { mutableStateOf(cfg.get("presentMode", "fifo")) }
-    var driverId by remember { mutableStateOf(cfg.get("driverId", "system")) }
-    var filterMode by remember { mutableStateOf(cfg.get("filterMode", "0").toIntOrNull() ?: 0) }
-    var swapRB by remember { mutableStateOf(cfg.getBoolean("swapRB", false)) }
+    // The config string is SEMICOLON-separated (see the confirm button below), so parse it that way.
+    // (The old KeyValueSet path split on commas and silently returned every default.)
+    val cfg = remember { parseVulkanConfig(initialConfig) }
+    var nativeRender by remember { mutableStateOf(cfg["native"] == "true") }
+    var presentMode by remember { mutableStateOf(cfg["presentMode"] ?: "fifo") }
+    var driverId by remember { mutableStateOf(cfg["driverId"] ?: "system") }
+    var filterMode by remember { mutableStateOf(cfg["filterMode"]?.toIntOrNull() ?: 0) }
+    var swapRB by remember { mutableStateOf(cfg["swapRB"] == "true") }
 
     AlertDialog(
         onDismissRequest = onDismiss,

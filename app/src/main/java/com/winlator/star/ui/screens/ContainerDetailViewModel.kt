@@ -72,6 +72,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // graphicsDriverConfig stored via dummy View tag in Screen composable
     var graphicsDriverConfig by mutableStateOf(Container.DEFAULT_GRAPHICSDRIVERCONFIG)
 
+    // Advanced Vulkan present options — backed by the container's dedicated renderer* fields
+    // (NOT graphicsDriverConfig, whose KeyValueSet/semicolon mismatch made these never apply).
+    var rendererNative      by mutableStateOf(false)
+    var rendererPresentMode by mutableStateOf("fifo")
+    var rendererDriverId    by mutableStateOf("system")
+    var rendererFilterMode  by mutableStateOf(0)
+    var rendererSwapRB      by mutableStateOf(false)
+
     var dxWrapperEntries by mutableStateOf(emptyList<String>()); private set
     var selectedDXWrapper by mutableStateOf(Container.DEFAULT_DXWRAPPER)
     var dxWrapperConfig by mutableStateOf(Container.DEFAULT_DXWRAPPERCONFIG)
@@ -276,6 +284,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         // Graphics driver (load as display name for dropdown)
         selectedGraphicsDriver   = identifierToDisplay(c?.graphicsDriver ?: Container.DEFAULT_GRAPHICS_DRIVER, graphicsDriverEntries)
         graphicsDriverConfig     = c?.graphicsDriverConfig ?: Container.DEFAULT_GRAPHICSDRIVERCONFIG
+        rendererNative           = c?.isRendererNative() ?: false
+        rendererPresentMode      = c?.getRendererPresentMode() ?: "fifo"
+        rendererDriverId         = c?.getRendererDriverId() ?: "system"
+        rendererFilterMode       = c?.getRendererFilterMode() ?: 0
+        rendererSwapRB           = c?.getRendererSwapRB() ?: false
         selectedDXWrapper        = identifierToDisplay(c?.getDXWrapper() ?: Container.DEFAULT_DXWRAPPER, dxWrapperEntries)
         dxWrapperConfig          = c?.getDXWrapperConfig() ?: Container.DEFAULT_DXWRAPPERCONFIG
 
@@ -558,6 +571,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setExclusiveXInput(exclusiveXInput)
             c.setRenderer(StringUtils.parseIdentifier(selectedRenderer))
+            c.setRendererNative(rendererNative)
+            c.setRendererPresentMode(rendererPresentMode)
+            c.setRendererDriverId(rendererDriverId)
+            c.setRendererFilterMode(rendererFilterMode)
+            c.setRendererSwapRB(rendererSwapRB)
             c.setInputType(inputType)
             c.setStartupSelection(selectedStartupSelection.toByte())
             c.setBox64Version(selectedBox64Version)
@@ -593,6 +611,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 put("fullscreenStretched", fullscreenStretched)
                 put("exclusiveXInput", exclusiveXInput)
                 put("renderer", StringUtils.parseIdentifier(selectedRenderer))
+                put("rendererNative", rendererNative)
+                put("rendererPresentMode", rendererPresentMode)
+                put("rendererDriverId", rendererDriverId)
+                put("rendererFilterMode", rendererFilterMode)
+                put("rendererSwapRB", rendererSwapRB)
                 put("inputType", inputType)
                 put("startupSelection", selectedStartupSelection)
                 put("box64Version", selectedBox64Version)

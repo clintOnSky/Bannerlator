@@ -1505,22 +1505,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // (onFpsLimitChange) updates it live afterwards.
         applyFpsLimit(resolvedFpsLimiterEnabled() ? container.getFpsLimiterValue() : 0);
 
-        // Apply the container's Vulkan renderer settings (native rendering, present mode, filter,
-        // swap R/B). These were previously parsed by the UI but never applied to the renderer.
+        // Apply the container's advanced Vulkan present settings (native rendering, present mode,
+        // filter, swap R/B). Source of truth = the container's dedicated renderer* fields. The old
+        // code parsed these out of graphicsDriverConfig via KeyValueSet, but that splits on COMMA
+        // while graphicsDriverConfig is SEMICOLON-separated -> every value silently fell to default,
+        // so these options never applied. These are container-level (not per-game shortcut extras).
         if (useVulkan && renderer instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
             com.winlator.star.renderer.vulkan.VulkanRenderer vkRenderer =
                 (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
-            String gdConfig = shortcut != null
-                ? shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig())
-                : container.getGraphicsDriverConfig();
-            com.winlator.star.core.KeyValueSet vkCfg = new com.winlator.star.core.KeyValueSet(gdConfig);
-            String pm = vkCfg.get("presentMode", "fifo");
-            int pmInt = pm.contains("immediate") ? 0 : pm.contains("mailbox") ? 1 : 2; // VK present mode
+            String pm = container.getRendererPresentMode();
+            int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
             vkRenderer.setVkPresentMode(pmInt);
-            vkRenderer.setFilterMode("1".equals(vkCfg.get("filterMode", "0")) ? 1 : 0);
-            vkRenderer.setSwapRB(vkCfg.getBoolean("swapRB", false));
+            vkRenderer.setFilterMode(container.getRendererFilterMode() == 1 ? 1 : 0);
+            vkRenderer.setSwapRB(container.getRendererSwapRB());
             // Must run before the surface is created so onSurfaceCreated sets up the scanout path.
-            boolean nativeOn = vkCfg.getBoolean("native", false);
+            boolean nativeOn = container.isRendererNative();
             vkRenderer.setInitialNativeMode(nativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(nativeOn); // keep the toggle in sync
             // Tick the perf HUD per present (the Vulkan AHB path bypasses copyArea, which normally
