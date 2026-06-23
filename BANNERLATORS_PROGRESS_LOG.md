@@ -312,3 +312,48 @@ mid-session (`onBionicFgConfigChange` bails "needs a relaunch" if the layer wasn
 **Persisted container values stay intact** — only the runtime seed + initial conf change. Net: an
 FG-enabled container launches with the layer loaded but OFF (badge grey, row shows Off) → user taps
 2×/3×/4× → live-on, no relaunch. ⏳ NEXT: CI build → device-test → merge to main (1.6).
+
+## 2026-06-23 — Investigation: FPS limiter only works with bionic-fg; lsfg-vk has no cap
+Not a code change — findings logged so we don't re-investigate.
+
+**Symptom (user):** the FPS limiter doesn't seem to work when lsfg-vk is the selected
+frame-gen engine.
+
+**Root cause:** the FPS limiter is implemented BY the bionic-fg layer — applied via
+`writeBionicFgConfig(mult, flow, limiterOn, fpsValue)`. The engine branches in
+`XServerDisplayActivity` are mutually exclusive (`if(lsfg) … else (bionic)`):
+- engine = **bionic-fg** → layer loads → limiter works live (conf.toml hot-reload). ✅
+- engine = **off** + limiter on → `if(fgOn||limiterOn)` still loads bionic-fg as a PACER-ONLY
+  (multiplier 0) → limiter already works LIVE today. ✅
+- engine = **lsfg-vk** → takes the lsfg branch, never loads bionic-fg, lsfg has no cap field →
+  limiter silently ignored. ❌ (the gap)
+
+**Verified lsfg-vk (GameNative fork) has NO fps-limit field** by dumping strings of the SHIPPED
+binary `app/src/main/assets/lsfg-vk/liblsfg-vk.so` (committed `1997a55`, manifest
+`VkLayer_LS_frame_generation.json`). Every key it parses: TOML `exe`/`multiplier`/`flow_scale`/
+`performance_mode`/`hdr_mode`/`experimental_present_mode`; env `LSFG_*` equivalents. NO frame-rate/
+fps-limit/cap key exists. Same key set as PancakeTAS upstream (whose docs also say to cap externally).
+The fork's only addition over upstream = conf.toml live-reload (`Rereading configuration`).
+
+**GOTCHA — CMakeLists points at the WRONG source.** `app/src/main/cpp/lsfg-vk/CMakeLists.txt` +
+`build-lsfg-android.sh` FetchContent `PancakeTAS/lsfg-vk@v2.0.0-dev` and output
+`libVkLayer_LSFGVK_frame_generation.so` — but the SHIPPED layer is the prebuilt GameNative-fork
+`liblsfg-vk.so` (different name). The CMake path is dead/aspirational; rebuilds must use the
+GameNative fork, not that CMakeLists.
+
+**Options for lsfg-vk + limiter (deferred, its own branch + device test):**
+1. `DXVK_FRAME_RATE` env — launch-time only (DXVK reads once at start, NO hot-reload) + DXVK-only
+   (no vkd3d/D3D12/native-Vulkan). Can't back a live in-game toggle. Weak fit.
+2. Stack the bionic-fg pacer (multiplier 0) under lsfg-vk → live + all-API, but two present-hooking
+   layers on one swapchain — needs device test for conflicts. **Preferred** (see reference design).
+
+**REFERENCE DESIGN — how GameHub 6.0.9 does live, all-API fps limit** (verified in
+`~/gamehub-6.0.9-jadx`): a **shared-memory present-level pacer**, not env vars. `tn2.java:1384-1392`
+maps a 9-byte mmap'd file (`RandomAccessFile`→`FileChannel.map(READ_WRITE,0,9L)`) shared between the
+app and the native wine process (offset 0 = short fps, offset 2 = a bool byte). Applier `f5o.h(int)`
+does `putShort(clamp(fps)); force()` — same method called live from the in-game slider (`ba.java:92`)
+and at launch (`lbo.java:71`). The native present loop in `libwinemu.so` reads the short EVERY FRAME
+and paces (no "fps" string literals in the `.so` — raw offset read). Live = polled shared memory;
+all-API = enforced at the present/swap layer ALL renderers funnel through. This is the same category
+as our bionic-fg pacer — confirming option 2 (keep a present-level pacer loaded regardless of FG
+engine) is the right shape, and DXVK_FRAME_RATE is a strictly worse imitation.
