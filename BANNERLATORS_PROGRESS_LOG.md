@@ -218,8 +218,8 @@ Repo: https://github.com/The412Banner/bannerlators (public). Created 2026-06-18.
 
 ## 2026-06-23 — File Manager: Back-button nav + Run-exe-in-container (device-found, branch `fix/file-manager-bugs`)
 Two device-found bugs in the in-app File Manager (`ui/screens/FileManagerScreen.kt`).
-⏳ **STAGED, UNCOMMITTED — not built, not device-confirmed** (user was mid-test on the prior
-fix5b build `888c796` when these were written).
+✅ **COMMITTED `5521e0f` + pushed; CI build run `28026509542` (build-artifacts.yml) triggered.**
+⏳ **NOT device-confirmed.**
 
 **Bug 1 — system Back exited the File Manager from any depth.** The path-bar ArrowBack button
 already went up one dir (clamped to `currentRoot`), but the Android system/gesture Back was
