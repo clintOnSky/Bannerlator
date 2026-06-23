@@ -391,3 +391,24 @@ XServerDrawerState.kt, XServerDrawer.kt, XServerDisplayActivity.java.
 **Build:** commit `f8d7598`, CI "CI Build (artifacts only)" run `28037736579` ✅ GREEN (native pacer
 + JNI + both renderer paths compile, full APK builds). ⏳ NEXT: device-test (all three FG modes ×
 both host renderers; live slider; throttle-vs-drop check).
+
+## 2026-06-23 — FPS limiter REWORK: guest-side via X11 Present IdleNotify pacing (the GameNative way)
+Device test of the host-side pacer FAILED: it capped the DISPLAY (OS overlay showed the cap) but
+NOT the game — DXVK HUD stayed at 50, GPU 98% (no backpressure to the guest). Recon of GameNative +
+Ludashi 3.1 found the real mechanism: pace the **X11 Present extension** by DELAYING the IdleNotify
+that tells the guest its buffer is free to reuse → the game (DXVK/vkd3d/...) BLOCKS → it throttles
+itself → in-game HUD reflects the cap + GPU drops. Live, all host renderers, all APIs.
+
+- REVERTED the host-side nanosleep pacer (VulkanRendererContext paceFrame/setFpsLimit + renderLoop
+  call + time.h, VulkanRendererScanout paceFrame, vulkan_jni nativeSetFpsLimit, VulkanRenderer
+  native decl/call/onSurfaceCreated, GLRenderer paceFrame/onDrawFrame). Kept VulkanRenderer's scanout
+  SurfaceControl.setFrameRate hint (GameNative's secondary mechanism) and GLRenderer's empty stub.
+- PORTED into our `PresentExtension`: `frameRateLimit` + `setFrameRateLimit`, per-window `WindowTiming`
+  pacing, `emitIdleNotify` (delays IdleNotify to `nextIdleNs += 1e9/fps`), fired via Choreographer
+  (vsync) or a MAX_PRIORITY CPU pacer thread fallback. Applied in all 3 present branches (FLIP/COPY/
+  copyArea). Mirrors GameNative `xserver/extensions/PresentExtension.java`.
+- WIRED: `XServerDisplayActivity.applyFpsLimit(fps)` → `PresentExtension.setFrameRateLimit` (+ renderer
+  scanout hint); called from `onFpsLimitChange` (live in-game) and at launch from the resolved
+  container/per-game value. Kept the bionic-fg decoupling + always-available UI from the prior commit.
+- TODO (refinement, not blocking): when lsfg multiplier ≥ 2, force limit 0 (lsfg paces its own output)
+  like GameNative — not yet wired (first cut targets the FG-off + bionic cases the user tested).

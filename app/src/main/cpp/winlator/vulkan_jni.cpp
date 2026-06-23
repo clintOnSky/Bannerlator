@@ -232,12 +232,6 @@ Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeIsGameFrameDelivered
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetFpsLimit(JNIEnv*, jobject, jlong handle, jint fps) {
-    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r) r->setFpsLimit((int)fps);
-}
-
-extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetFilterMode(JNIEnv*, jobject, jlong handle, jint mode) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     if (r) r->setFilterMode((int)mode);

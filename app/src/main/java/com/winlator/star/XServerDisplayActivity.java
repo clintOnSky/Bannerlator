@@ -412,14 +412,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             container.setFrameGenFlowScale(flow);
             container.saveData();
         };
-        // Standalone FPS limiter: applies live to whichever host renderer is active, regardless of
-        // the frame-gen engine (or none). Output-cap = caps on-screen fps. Persists to the container.
+        // Standalone FPS limiter: paces the X11 Present extension (delays IdleNotify) so the GAME
+        // itself throttles — works live with any frame-gen engine or none, all host renderers, all
+        // APIs. Output of the guest present is what's capped. Persists to the container.
         state.onFpsLimitChange = () -> {
             XServerDrawerState s = XServerDrawerState.INSTANCE;
             boolean limOn  = s.getFpsLimiterEnabled().getValue();
             int   limitVal = s.getFpsLimit().getValue();   // remembered slider value, kept across on/off
-            HostRenderer r = xServerView.getRenderer();
-            if (r != null) r.setFpsLimit(limOn && limitVal > 0 ? limitVal : 0);
+            applyFpsLimit(limOn && limitVal > 0 ? limitVal : 0);
             container.setFpsLimiterEnabled(limOn);
             if (limitVal > 0) container.setFpsLimiterValue(limitVal);
             container.saveData();
@@ -1497,10 +1497,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
 
-        // Standalone FPS limiter (host-side present pacer): apply the resolved per-game/container
-        // value to the renderer up front, independent of the frame-gen engine. The in-game toggle
+        // Standalone FPS limiter (guest-side, via the X11 Present extension): apply the resolved
+        // per-game/container value up front, independent of the frame-gen engine. The in-game toggle
         // (onFpsLimitChange) updates it live afterwards.
-        renderer.setFpsLimit(resolvedFpsLimiterEnabled() ? container.getFpsLimiterValue() : 0);
+        applyFpsLimit(resolvedFpsLimiterEnabled() ? container.getFpsLimiterValue() : 0);
 
         // Apply the container's Vulkan renderer settings (native rendering, present mode, filter,
         // swap R/B). These were previously parsed by the UI but never applied to the renderer.
@@ -2487,6 +2487,19 @@ return true;
             return shortcut.getExtra("fpsLimiterEnabled", container.isFpsLimiterEnabled() ? "1" : "0").equals("1");
         }
         return container.isFpsLimiterEnabled();
+    }
+
+    // Apply the FPS cap (0 = off). The real limiter is the X11 Present extension, which throttles
+    // the guest by pacing its IdleNotify (so the game itself slows -> in-game HUD reflects it, GPU
+    // drops). Also feeds the renderer's SurfaceControl frame-rate hint (active in Vulkan native mode).
+    private void applyFpsLimit(int fps) {
+        com.winlator.star.xserver.extensions.PresentExtension pe =
+                xServer.getExtension(com.winlator.star.xserver.extensions.PresentExtension.MAJOR_OPCODE);
+        if (pe != null) pe.setFrameRateLimit(fps);
+        if (xServerView != null) {
+            HostRenderer r = xServerView.getRenderer();
+            if (r != null) r.setFpsLimit(fps);
+        }
     }
 
 

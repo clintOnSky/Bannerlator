@@ -6,7 +6,6 @@
 #include <cstring>
 #include <algorithm>
 #include <inttypes.h>
-#include <time.h>
 #include <dlfcn.h>
 #include "window_vert.h"
 #include "window_frag.h"
@@ -791,37 +790,6 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     }
 }
 
-void VulkanRendererContext::setFpsLimit(int fps) {
-    targetFrameIntervalNs.store(fps > 0 ? (1000000000LL / fps) : 0, std::memory_order_relaxed);
-    std::lock_guard<std::mutex> lk(paceMutex);
-    lastPresentNs = 0; // reset the pacing baseline so a new cap takes effect cleanly
-}
-
-// Sleep until the next allowed present time so the host present rate is held at the target fps.
-// Absolute-time sleep against CLOCK_MONOTONIC avoids drift; if we're already behind schedule we
-// rebase to now (no burst catch-up). No render locks are held across the sleep.
-void VulkanRendererContext::paceFrame() {
-    int64_t interval = targetFrameIntervalNs.load(std::memory_order_relaxed);
-    if (interval <= 0) return;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    int64_t now = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
-    int64_t target;
-    {
-        std::lock_guard<std::mutex> lk(paceMutex);
-        if (lastPresentNs == 0 || now >= lastPresentNs + interval) {
-            lastPresentNs = now;   // first frame or behind schedule -> present now
-            return;
-        }
-        target = lastPresentNs + interval;
-        lastPresentNs = target;
-    }
-    struct timespec until;
-    until.tv_sec  = (time_t)(target / 1000000000LL);
-    until.tv_nsec = (long)(target % 1000000000LL);
-    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &until, nullptr);
-}
-
 void VulkanRendererContext::renderLoop() {
 
     while (isRunning) {
@@ -831,9 +799,6 @@ void VulkanRendererContext::renderLoop() {
         if (!isRunning) break;
 
         if (swapchain == VK_NULL_HANDLE || cmdBufs.empty()) continue;
-        // Pace only real game frames (composite present path). cursor-only / resize wakes don't
-        // count, and scanout game frames are paced in scanoutSetBuffer instead. No locks held here.
-        if (needsRender.load()) paceFrame();
         try { renderFrame(); } catch(...) {}
     }
 }

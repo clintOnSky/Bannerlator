@@ -89,7 +89,6 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeUpdateCursorImage(long handle, java.nio.ByteBuffer pixels,
         short width, short height, short hotX, short hotY);
     private native void nativeSetRenderList(long handle, long[] ids, int[] xs, int[] ys, int count);
-    private native void nativeSetFpsLimit(long handle, int fps);
     private native void nativeRemoveWindow(long handle, long id);
 
     private native void nativeInitScanout(long handle);
@@ -142,7 +141,6 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
-                    nativeSetFpsLimit(nativeHandle, fpsLimit);
                     updateTransform();
                     nativeSetCursorVisible(nativeHandle, cursorVisible);
                     if (nativeMode) {
@@ -740,11 +738,6 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     public int getFpsLimit() { return fpsLimit; }
     public void setFpsLimit(int limit) {
         this.fpsLimit = limit;
-        // Standalone host-side cap (engine-agnostic): the native present loop paces to this rate.
-        // Live — applies mid-session; also re-applied on surface (re)create from the stored field.
-        synchronized (lock) {
-            if (nativeHandle != 0) nativeSetFpsLimit(nativeHandle, limit);
-        }
         if (android.os.Build.VERSION.SDK_INT >= 30 && scanoutGameSC != null) {
             float targetFps = limit > 0 ? (float)limit
                 : xServerView.getDisplay() != null

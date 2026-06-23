@@ -195,10 +195,6 @@ void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y,
       }
     }
 
-    // Host-side FPS cap for the scanout (Native Rendering) present path. Same limiter as the
-    // composite path; holds the game flip rate at the target. No-op when the limiter is off.
-    paceFrame();
-
     ST_APPLY(t);
 
     gameFrameDelivered.store(true, std::memory_order_release);

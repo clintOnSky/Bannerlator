@@ -142,16 +142,6 @@ public:
     std::atomic<bool> gameFrameDelivered{false};
     std::atomic<bool> surfaceDetached{false};
 
-    // Standalone host-side FPS limiter (output-cap, engine-agnostic). 0 = off. paceFrame() sleeps
-    // before a present so the host present rate is held at the target, capping on-screen fps for
-    // every guest API / frame-gen engine. Called from the composite present (renderLoop) and the
-    // scanout game flip (scanoutSetBuffer).
-    std::atomic<int64_t> targetFrameIntervalNs{0};
-    int64_t lastPresentNs = 0;
-    std::mutex paceMutex;
-    void setFpsLimit(int fps);
-    void paceFrame();
-
     void detachSurface();
     bool reattachSurface(ANativeWindow* newWindow);
 
