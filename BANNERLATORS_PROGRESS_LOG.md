@@ -387,3 +387,7 @@ OPEN device-test unknown: does host pacing THROTTLE the guest (saves GPU/battery
 or just DROP frames (cap visual only)? Needs a device check. Files: VulkanRendererContext.{h,cpp},
 VulkanRendererScanout.cpp, vulkan_jni.cpp, VulkanRenderer.java, GLRenderer.java,
 XServerDrawerState.kt, XServerDrawer.kt, XServerDisplayActivity.java.
+
+**Build:** commit `f8d7598`, CI "CI Build (artifacts only)" run `28037736579` ✅ GREEN (native pacer
++ JNI + both renderer paths compile, full APK builds). ⏳ NEXT: device-test (all three FG modes ×
+both host renderers; live slider; throttle-vs-drop check).
