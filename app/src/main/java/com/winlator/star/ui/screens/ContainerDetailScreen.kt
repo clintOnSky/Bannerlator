@@ -28,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -319,7 +320,17 @@ internal fun VulkanSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.vulkan_settings)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Cap the scrollable region so tall content scrolls inside the dialog instead of
+            // pushing the OK/Cancel buttons off-screen (Material3 AlertDialog doesn't bound its
+            // text slot height on its own).
+            val maxContentHeight = (LocalConfiguration.current.screenHeightDp * 0.7f).dp
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxContentHeight)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.renderer_native), Modifier.weight(1f))
                     Switch(checked = nativeRender, onCheckedChange = { nativeRender = it })
@@ -1368,7 +1379,16 @@ internal fun GraphicsDriverConfigDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.graphics_driver_configuration)) },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState()).fillMaxWidth()) {
+            // Cap the scrollable region so tall content scrolls inside the dialog instead of
+            // pushing the OK/Cancel buttons off-screen (Material3 AlertDialog doesn't bound its
+            // text slot height on its own).
+            val maxContentHeight = (LocalConfiguration.current.screenHeightDp * 0.7f).dp
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxContentHeight)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 LabeledDropdown(stringResource(R.string.graphics_driver_vulkan_version), vulkanVersions, vulkanVersion, { vulkanVersion = it })
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_version), driverVersions, version, { version = it })
