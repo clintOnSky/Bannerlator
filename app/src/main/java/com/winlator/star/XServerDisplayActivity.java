@@ -226,6 +226,35 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     };
 
+    // ---- Component installer auto-exit (Phase 3b) ----
+    // When launched to run a component installer (.NET/vcredist), watch the guest process list and
+    // auto-close the session once the installer (and any msiexec it spawns) has exited, so the user
+    // doesn't have to manually leave the container after each installer.
+    private String componentInstallerExe;
+    private boolean installerProcSeen = false;
+    private int installerGoneTicks = 0;
+    private final java.util.ArrayList<String> installerTickNames = new java.util.ArrayList<>();
+    private final Handler installerWatchHandler = new Handler(Looper.getMainLooper());
+    private final OnGetProcessInfoListener installerProcListener = new OnGetProcessInfoListener() {
+        @Override
+        public void onGetProcessInfo(int index, int count, ProcessInfo info) {
+            if (index == 0) installerTickNames.clear();
+            if (info != null && info.name != null) installerTickNames.add(info.name.toLowerCase());
+            if (count == 0 || index == count - 1) evaluateInstallerTick();
+        }
+    };
+    private final Runnable installerWatchRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (winHandler != null) {
+                // Re-assert our listener (the Task Manager may have taken it) then request the list.
+                winHandler.setOnGetProcessInfoListener(installerProcListener);
+                winHandler.listProcesses();
+            }
+            installerWatchHandler.postDelayed(this, 2000);
+        }
+    };
+
     private boolean isDarkMode;
 
     private String screenEffectProfile;
@@ -509,6 +538,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String screenSize = Container.DEFAULT_SCREEN_SIZE;
         containerManager = new ContainerManager(this);
         container = containerManager.getContainerById(getIntent().getIntExtra("container_id", 0));
+
+        componentInstallerExe = getIntent().getStringExtra("component_installer_exe");
 
         // Log shortcut_path
         String shortcutPath = getIntent().getStringExtra("shortcut_path");
@@ -1044,6 +1075,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void exit() {
+        installerWatchHandler.removeCallbacks(installerWatchRunnable);
         NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
         preloaderDialog.showOnUiThread(R.string.shutdown);
         handler.postDelayed(new Runnable() {
@@ -1478,6 +1510,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Start the WinHandler (writes events to the file)
         winHandler.start();
+
+        // If this session was launched to run a component installer, watch for it to finish and
+        // auto-close the container (see componentInstallerExe / installerWatchRunnable).
+        if (componentInstallerExe != null && !componentInstallerExe.isEmpty()) startInstallerWatch();
 
         if (wineRequestHandler != null) wineRequestHandler.start();
 
@@ -2879,6 +2915,54 @@ return true;
         registerTmProcessInfoListener();
         tmPollHandler.removeCallbacks(tmPollRunnable);
         tmPollHandler.post(tmPollRunnable);
+    }
+
+    // ---- Component installer auto-exit (Phase 3b) ----
+
+    private void startInstallerWatch() {
+        installerProcSeen = false;
+        installerGoneTicks = 0;
+        installerWatchHandler.removeCallbacks(installerWatchRunnable);
+        // Give Wine a head start to boot and actually launch the installer before we begin watching,
+        // so we don't conclude "finished" before it has even appeared.
+        installerWatchHandler.postDelayed(installerWatchRunnable, 8000);
+    }
+
+    private boolean looksLikeInstallerProc(String name) {
+        if (name == null) return false;
+        String target = componentInstallerExe != null ? componentInstallerExe.toLowerCase() : "";
+        // The bootstrapper may relaunch itself from %temp% under its original name and spawn msiexec,
+        // so match the staged name plus the usual installer/runtime process names.
+        return name.equals(target)
+                || name.contains("msiexec")
+                || name.contains("redist")
+                || name.contains("vcredist")
+                || name.contains("dotnet")
+                || name.contains("ndp")
+                || name.contains("setup")
+                || name.contains("install");
+    }
+
+    private void evaluateInstallerTick() {
+        if (componentInstallerExe == null) return;
+        boolean present = false;
+        for (String n : installerTickNames) {
+            if (looksLikeInstallerProc(n)) { present = true; break; }
+        }
+        if (present) {
+            installerProcSeen = true;
+            installerGoneTicks = 0;
+        } else if (installerProcSeen) {
+            installerGoneTicks++;
+            // Require a few consecutive empty ticks so a brief gap (bootstrapper exits, then msiexec
+            // spawns) doesn't trip an early exit.
+            if (installerGoneTicks >= 3) {
+                installerWatchHandler.removeCallbacks(installerWatchRunnable);
+                componentInstallerExe = null;
+                if (winHandler != null) winHandler.setOnGetProcessInfoListener(null);
+                runOnUiThread(XServerDisplayActivity.this::exit);
+            }
+        }
     }
 
     private void stopTmPolling() {

@@ -166,7 +166,8 @@ object ComponentExecInstaller {
                 }
                 i++
             }
-            // Reached the end with no further installer — done.
+            // Reached the end with no further installer — done. Drop the staged installer exes.
+            File(root, ".wine/drive_c/windows/temp/bannerlator_components").deleteRecursively()
             clearPlan(context)
             onProgress(1f)
             return Result.Done
@@ -244,6 +245,9 @@ object ComponentExecInstaller {
         intent.putExtra("container_id", container.id)
         intent.putExtra("shortcut_path", shortcut.absolutePath)
         intent.putExtra("shortcut_name", shortcut.nameWithoutExtension)
+        // Tells XServerDisplayActivity to auto-close the session once this installer process exits,
+        // so the user doesn't have to manually exit the container after each installer.
+        intent.putExtra("component_installer_exe", safe)
         if (context !is android.app.Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
     }
