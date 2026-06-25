@@ -15,6 +15,34 @@ gh workflow run "Any branch compilation." --repo The412Banner/star-compose --ref
 
 ---
 
+## 2026-06-24 — Pluvia Steam: Phase 1 (Goldberg/coldclient launch) — branch `feat/steam-pluvia-launch`
+
+Implementing the recommended **Option A** from `docs/STEAM_PLUVIA_PORT_PLAN.md` — **UPGRADE the
+existing Steam store** (browse/login/download/UI stay ours, unchanged from 1.7), adding only the
+Goldberg/coldclient **launch** so SteamAPI titles actually run. ⚠️ User confirmed scope 2026-06-24:
+NOT a full replacement (drawer "Steam" still opens our existing store). All work on the branch; NOT
+merged; device-test pending.
+
+- **Step 1 (`ff13265`)** — bundled asset `experimental-drm.tzst` (coldclient loader x32/x64 +
+  emulated steamclient DLLs + extra_dlls; PE → host-arch independent) + `SteamClientManager.kt`
+  (extracts it into the imageFs Steam dir). Ported from REF4IK/winlator-ref4ik- (GPL-3.0).
+- **Step 2 (`1c6839d`)** — `SteamLaunchUtils.kt`: self-contained **offline** Goldberg helpers
+  (writeColdClientIni, generateInterfacesFile, writeOfflineSteamSettings, backupSteamclientFiles,
+  putBackSteamDlls, setupLightweightSteamConfig, skipFirstTimeSteamSetup, ensureSteamappsCommonSymlink).
+  No dependency on ref4ik's Room SteamService; account read from our `steam_prefs`.
+- **Step 3 (`f0b6106`)** — launch glue: `prepareColdClientLaunch` + `writeGameSteamSettings` +
+  `StarLaunchBridge.addSteamGameToLauncher`/`writeSteamShortcut` (container picker → activateContainer →
+  prepare env → write `.desktop` `Exec=wine C:/Program Files (x86)/Steam/steamclient_loader_x64.exe`
+  with `game_source=STEAM` Extra Data). Prefix model = `activateContainer` repoints the `home/xuser`
+  symlink → active container; corrected ref4ik's `skipFirstTimeSteamSetup` to take `imageFs.rootDir`.
+- **Step 4 (`73834d6`)** — Compose UI: `SteamGameDetailActivity` shows a Compose AlertDialog
+  ("Steam emulation" vs "Run .exe directly") after exe resolution → routes to the coldclient path or
+  legacy raw path; `SteamGamesActivity` defaults its add paths to the emulation route.
+
+Compile CIs: steps 1+2 `28141425805` ✅ green; steps 3 `28141874404` / 4 `28142049412` ⏳ pending.
+**Next:** device-test a steam_api title (download → add with Steam emulation → boots under Goldberg)
+→ then merge to main. Possible follow-ups: preferred-container, PICS LaunchInfo exe detection, cloud saves.
+
 ## 2026-06-24 — 🚀 Release 1.7
 
 Cut **Bannerlator 1.7** (`versionName 1.7`, `versionCode 25`, commit `30c869c`). Version bumped in
