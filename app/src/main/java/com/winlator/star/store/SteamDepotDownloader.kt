@@ -163,6 +163,20 @@ object SteamDepotDownloader {
         }
         dlog("SteamClient: connected=${repo.isConnected}, loggedIn=${repo.isLoggedIn}")
 
+        // Steam connections cycle, and the re-logon after a reconnect is async — so we can land
+        // here connected but not yet logged in (the cached license list hides it). Starting a
+        // depot download without a live session makes the manifest job time out → the user sees a
+        // bogus "Unknown error". Wait for the session to come back (re-logging-on if needed).
+        if (!repo.isLoggedIn) {
+            dlog("Not logged in — waiting for session (re-logging-on from saved token if available)…")
+            val ok = repo.ensureLoggedIn(15_000L)
+            dlog("ensureLoggedIn → $ok (loggedIn=${repo.isLoggedIn})")
+            if (!ok) {
+                emitFailed(appId, "Steam session not ready — sign in again or retry in a moment")
+                return
+            }
+        }
+
         val licenses = repo.getLicenses()
         dlog("Licenses: ${licenses.size} entries")
         if (licenses.isEmpty()) {

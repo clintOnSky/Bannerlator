@@ -723,6 +723,31 @@ public final class SteamRepository {
     }
 
     /**
+     * Ensure there is a live, logged-in Steam session before a depot download.
+     *
+     * Steam CM connections cycle routinely: onDisconnected clears {@code loggedIn} and the
+     * auto-reconnect re-logs-on asynchronously, so a caller can briefly see
+     * connected=true / loggedIn=false (the cached license list masks it). If we have a saved
+     * session, kick a token logon and block the CALLING thread up to {@code timeoutMs} for the
+     * LoggedOn callback to land — the pump thread keeps running callbacks meanwhile, so this
+     * does not deadlock (never call this from the pump thread).
+     *
+     * @return true if logged in by the time we return.
+     */
+    public boolean ensureLoggedIn(long timeoutMs) {
+        if (loggedIn) return true;
+        if (steamClient == null || !connected) return false;
+        if (!isLoggedInPrefs()) return false;   // no saved token — user must sign in
+        loginWithToken(pGet("username", ""), pGet("refresh_token", ""));
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (!loggedIn && System.currentTimeMillis() < deadline) {
+            try { Thread.sleep(150); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+        }
+        return loggedIn;
+    }
+
+    /**
      * Persist credentials returned from the Steam auth session
      * (called from Phase 2 auth flow after pollingWaitForResult).
      */
