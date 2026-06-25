@@ -15,6 +15,58 @@ gh workflow run "Any branch compilation." --repo The412Banner/star-compose --ref
 
 ---
 
+## 2026-06-25 — GameHub-style performance HUD port (branch `feat/gamehub-perf-hud`) — P0–P4 coded, device-test pending
+
+A second, **selectable** in-game performance HUD modeled on GameHub 6.0.9's overlay, alongside the
+existing `FrameRating`. User scope: **full parity** (17 controls), **per-container**, **all 3 skins**.
+Clean reimplementation (our own View + data we already collect) — no GameHub code/assets copied.
+
+Recon: 3 Explore agents over the jadx decompile (`/home/claude-user/gamehub-6.0.9-jadx`, GameHub =
+Compose-Multiplatform `com.xiaoji.egggame`, obfuscated). HUD = plain Canvas/Paint/Path (no Compose/GL/
+native for visuals; ref legacy View `o6m.java`). Two layouts (horizontal pill / vertical list), FPS line
+graph (last 50 samples, peak clamped ≥60, 30fps guide), Classic/Neon/Mono skins, color-intensity
+(0.72/0.88/1.0), text outline (off/1.0dp/1.4dp), scale 0.6–1.4, opacity. Most metrics already collected
+by `FrameRating`; FPS comes from our own frame counter (GameHub's `libxserver.so` shm not needed).
+
+- **P0 plan** `docs/GAMEHUB_PERF_HUD_PORT_PLAN.md`.
+- **P1+P2** new `widget/PerfHudView.java` — self-contained Canvas view: both layouts, per-field colors,
+  FPS graph, all 3 skins, color-intensity, outline, scale, opacity; parses the `fpsCounterConfig`
+  KeyValueSet; `update()` frame-tick mirrors `FrameRating`; tap-toggle + drag. Standalone compile CI
+  `28175068799` ✅ green.
+- **P3** new `widget/HudMetrics.java` — shared collector: GPU% / temp / RAM / power+charging ported from
+  `FrameRating`, **plus** overall CPU usage % (`/proc/stat` delta) and the dual-battery power fix (sums
+  `battery`+`bms`+`main` `current_now` with abs()).
+- **P0 wiring** `XServerDisplayActivity.java` — when `hudStyle=gamehub`, creates a `PerfHudView`
+  (WRAP_CONTENT params) instead of the two `FrameRating` views; handled at every HUD site (create /
+  show-hide / frame-tick update / live applyConfig / `toggleFpsHudOrientation`→`perfHud.setVertical` /
+  DX-API detect→`setEngineLabel` / `_MESA_DRV_GPU_NAME`→`setGpuModel`). Classic path unchanged.
+- **P4 config UI** `ContainerDetailScreen.kt` `FpsCounterConfigDialog` — "GameHub-style HUD" switch
+  (`hudStyle`) + 9 metric toggles + dual-battery + scale/opacity sliders + skin/color/outline 3-stop
+  FilterChip selectors (`HudToggleRow`/`HudThreeStop`); toggles emitted under both classic + gamehub key
+  names; bounded scroll via `heightIn(screenHeight*0.7)`.
+
+Config keys (per-container `fpsCounterConfig`): `hudStyle=classic|gamehub`, `hudMode`, `showFPS`,
+`showFPSGraph`, `showCPUUsage`(+`showCPULoad`), `showGPULoad`, `showRAM`, `showPower`,
+`showTemp`(+`showBatteryTemp`), `showEngine`(+`showRenderer`), `showGpuModel`, `hudDualBattery`,
+`hudSkin=classic|neon|mono`, `hudColor=soft|mid|vivid`, `hudOutline=off|soft|strong`, `hudScale` (50–150),
+`hudOpacity` (0–100), `hudTransparency` (classic).
+
+Branch tip `b2fc55e`. Full artifact build CI `28176206476` (in progress at time of writing). **NOT merged.**
+Next: verify build green → device-test (enable "GameHub-style HUD" in a container's FPS settings, launch,
+confirm render + tap-flip + live metrics) → tune dimensions/colors on device → merge to main. Caveats:
+HUD dimensions are first-guess; CPU% is overall-device (not per-game); in-game `XServerDrawer.kt` config
+not extended (container-detail dialog only; orientation tap still works in-game).
+
+## 2026-06-25 — Two HUD fixes merged to main (`ac6abbb`)
+
+- **Fake FPS offset removed** (`19c9982`): stripped a fudge offset from `FrameRating.java` +
+  `FrameRatingHorizontal.java` so the on-screen FPS reads true when native rendering is on.
+- **Vertical HUD tap area fixed** (`ac6abbb`): the vertical `FrameRating` was added to the root
+  `FrameLayout` with no LayoutParams, inheriting FrameLayout's `MATCH_PARENT × MATCH_PARENT` default — so
+  its tap-to-toggle hit area covered the whole screen (a tap far from the overlay flipped orientation).
+  Fixed with explicit `WRAP_CONTENT` + top-left gravity. Both built green (`28172970834`) and
+  fast-forward-merged to main; `fix/fps-hud-tap-area` deleted. No release cut (still versionCode 25).
+
 ## 2026-06-24 — Steam detail-page revamp — branch `feat/steam-detail-revamp` (stacked on launch branch)
 
 User asked to modernize the Steam game detail page. Picked all of: stored-info rows, last-played,
