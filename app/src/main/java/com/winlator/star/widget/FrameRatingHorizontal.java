@@ -17,7 +17,6 @@ import android.widget.TextView;
 import com.winlator.star.R;
 import com.winlator.star.core.KeyValueSet;
 import com.winlator.star.core.StringUtils;
-import com.winlator.star.ui.XServerDrawerState;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -194,9 +193,6 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
     public void run() {
         float displayFps = lastFPS;
         if (tvFPS != null) {
-            if (XServerDrawerState.INSTANCE.getNativeRenderingEnabled()) {
-                displayFps = applyDisplayTimingOffset(lastFPS);
-            }
             tvFPS.setText(String.format(Locale.ENGLISH, "FPS: %.0f", displayFps));
             tvFPS.setTextColor(lastFPS > 30 ? 0xFF4CAF50 :
                                lastFPS > 20 ? 0xFFFFEB3B : 0xFFF44336);
@@ -301,15 +297,6 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
             if (t > 0) return t;
         }
         return 0;
-    }
-
-    private float applyDisplayTimingOffset(float rawFps) {
-        float fpsBase = Math.max(rawFps, 1.0f);
-        long now = System.nanoTime();
-        float syncJitter = ((float)((now >> 6) & 0x7FF)) * 0.004f;
-        float baseOffset = 5.0f + syncJitter;
-        float scale = Math.max(1.0f, 30.0f / fpsBase);
-        return fpsBase + Math.min(baseOffset * scale, 25.0f);
     }
 
     private int calculateGPULoad() {
