@@ -280,6 +280,34 @@ Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetUpscaleSharpness(
     if (r) r->setUpscaleSharpness((int)sharpness);
 }
 
+// --- Phase 2 composable screen effects (GL EffectComposer parity) ---
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetFxaa(JNIEnv*, jobject, jlong handle, jboolean enabled) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setFxaa(enabled == JNI_TRUE);
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetToon(JNIEnv*, jobject, jlong handle, jboolean enabled) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setToon(enabled == JNI_TRUE);
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetCrt(JNIEnv*, jobject, jlong handle, jboolean enabled) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setCrt(enabled == JNI_TRUE);
+}
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetNtsc(JNIEnv*, jobject, jlong handle, jboolean enabled) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setNtsc(enabled == JNI_TRUE);
+}
+// Color grade: brightness/contrast as the raw -100..100 sliders, gamma 0.5..3.0.
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetColorGrade(JNIEnv*, jobject, jlong handle, jfloat brightness, jfloat contrast, jfloat gamma) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setColorGrade((float)brightness, (float)contrast, (float)gamma);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetPresentMode(JNIEnv*, jobject, jlong handle, jint mode) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);

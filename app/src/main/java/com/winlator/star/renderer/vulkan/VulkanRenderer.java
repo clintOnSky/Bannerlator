@@ -110,6 +110,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeSetCas(long handle, boolean enabled, int sharpness);
     private native void nativeSetHdr(long handle, boolean enabled);
     private native void nativeSetUpscaleSharpness(long handle, int sharpness);
+    private native void nativeSetFxaa(long handle, boolean enabled);
+    private native void nativeSetToon(long handle, boolean enabled);
+    private native void nativeSetCrt(long handle, boolean enabled);
+    private native void nativeSetNtsc(long handle, boolean enabled);
+    private native void nativeSetColorGrade(long handle, float brightness, float contrast, float gamma);
     private native void nativeSetSwapRB(long handle, boolean enabled);
     private native void nativeSetPresentMode(long handle, int mode);
     private native int[] nativeGetSupportedPresentModes(long handle);
@@ -150,6 +155,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     nativeSetUpscaleSharpness(nativeHandle, pendingUpscaleSharpness);
                     nativeSetCas(nativeHandle, pendingCasEnabled, pendingCasSharpness);
                     nativeSetHdr(nativeHandle, pendingHdrEnabled);
+                    nativeSetFxaa(nativeHandle, pendingFxaaEnabled);
+                    nativeSetToon(nativeHandle, pendingToonEnabled);
+                    nativeSetCrt(nativeHandle, pendingCrtEnabled);
+                    nativeSetNtsc(nativeHandle, pendingNtscEnabled);
+                    nativeSetColorGrade(nativeHandle, pendingColorBrightness, pendingColorContrast, pendingColorGamma);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     updateTransform();
                     nativeSetCursorVisible(nativeHandle, cursorVisible);
@@ -732,6 +742,29 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) { if (nativeHandle != 0) nativeSetUpscaleSharpness(nativeHandle, sharpness); }
     }
 
+    // Phase 2 composable screen effects (GL EffectComposer parity). Color grade takes
+    // the raw slider values (brightness/contrast -100..100, gamma 0.5..3.0); neutral
+    // (0,0,1) is a no-op. FXAA/Toon/CRT/NTSC are binary. Drawer-only / session-live.
+    public void setScreenEffects(float brightness, float contrast, float gamma,
+                                 boolean fxaa, boolean toon, boolean crt, boolean ntsc) {
+        pendingColorBrightness = brightness;
+        pendingColorContrast   = contrast;
+        pendingColorGamma      = gamma;
+        pendingFxaaEnabled = fxaa;
+        pendingToonEnabled = toon;
+        pendingCrtEnabled  = crt;
+        pendingNtscEnabled = ntsc;
+        synchronized (lock) {
+            if (nativeHandle != 0) {
+                nativeSetColorGrade(nativeHandle, brightness, contrast, gamma);
+                nativeSetFxaa(nativeHandle, fxaa);
+                nativeSetToon(nativeHandle, toon);
+                nativeSetCrt(nativeHandle, crt);
+                nativeSetNtsc(nativeHandle, ntsc);
+            }
+        }
+    }
+
     public void setSwapRB(boolean enabled) {
         pendingSwapRB = enabled;
         synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
@@ -789,6 +822,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private int     pendingCasSharpness   = 60;
     private boolean pendingHdrEnabled     = false;
     private int     pendingUpscaleSharpness = 75;   // 75 -> 0.25 RCAS stops (legacy default)
+    private boolean pendingFxaaEnabled    = false;
+    private boolean pendingToonEnabled    = false;
+    private boolean pendingCrtEnabled     = false;
+    private boolean pendingNtscEnabled    = false;
+    private float   pendingColorBrightness = 0.0f;  // -100..100 slider; 0 = neutral
+    private float   pendingColorContrast   = 0.0f;  // -100..100 slider; 0 = neutral
+    private float   pendingColorGamma      = 1.0f;  // 0.5..3.0 slider; 1.0 = neutral
     private boolean pendingSwapRB         = false;
     public int getFpsLimit() { return fpsLimit; }
     public void setFpsLimit(int limit) {

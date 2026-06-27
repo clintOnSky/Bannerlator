@@ -538,6 +538,43 @@ private fun GraphicsContent(state: XServerDrawerState) {
         }
 
         HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+
+        // ---- Screen Effects (GL EffectComposer parity, ported to the Vulkan post
+        //      chain). Color grade is always-applied via the sliders (neutral = no-op);
+        //      FXAA/Toon/CRT/NTSC are toggles. Drawer-only / session-live. ----
+        Text("Screen Effects", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Spacer(Modifier.height(4.dp))
+
+        val initVkBrightness by XServerDialogState.vkBrightness.collectAsState()
+        val initVkContrast   by XServerDialogState.vkContrast.collectAsState()
+        val initVkGamma      by XServerDialogState.vkGamma.collectAsState()
+        val initVkFxaa       by XServerDialogState.vkFxaa.collectAsState()
+        val initVkToon       by XServerDialogState.vkToon.collectAsState()
+        val initVkCrt        by XServerDialogState.vkCrt.collectAsState()
+        val initVkNtsc       by XServerDialogState.vkNtsc.collectAsState()
+        var vkBrightness by remember(initVkBrightness) { mutableFloatStateOf(initVkBrightness) }
+        var vkContrast   by remember(initVkContrast)   { mutableFloatStateOf(initVkContrast) }
+        var vkGamma      by remember(initVkGamma)      { mutableFloatStateOf(initVkGamma) }
+        var vkFxaa       by remember(initVkFxaa)       { mutableStateOf(initVkFxaa) }
+        var vkToon       by remember(initVkToon)       { mutableStateOf(initVkToon) }
+        var vkCrt        by remember(initVkCrt)        { mutableStateOf(initVkCrt) }
+        var vkNtsc       by remember(initVkNtsc)       { mutableStateOf(initVkNtsc) }
+
+        fun applyVkSe() {
+            XServerDialogState.onVulkanScreenEffectsApply?.invoke(
+                vkBrightness, vkContrast, vkGamma, vkFxaa, vkToon, vkCrt, vkNtsc)
+        }
+
+        LabeledSlider("Brightness", vkBrightness, -100f..100f, { vkBrightness = it; applyVkSe() }, enabled = true)
+        LabeledSlider("Contrast", vkContrast, -100f..100f, { vkContrast = it; applyVkSe() }, enabled = true)
+        LabeledSlider("Gamma", vkGamma, 0.5f..3.0f, { vkGamma = it; applyVkSe() }, enabled = true, format = { "%.2f".format(it) })
+
+        ToggleRow("FXAA", vkFxaa, true) { vkFxaa = it; applyVkSe() }
+        ToggleRow("Toon", vkToon, true) { vkToon = it; applyVkSe() }
+        ToggleRow("CRT", vkCrt, true) { vkCrt = it; applyVkSe() }
+        ToggleRow("NTSC", vkNtsc, true) { vkNtsc = it; applyVkSe() }
+
+        HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
     }
 
     if (!effectsSupported && !vulkanSupported) {

@@ -17,6 +17,11 @@
 #include "downscale_frag.h"
 #include "cas_frag.h"
 #include "hdr_frag.h"
+#include "fxaa_frag.h"
+#include "toon_frag.h"
+#include "color_frag.h"
+#include "ntsc_frag.h"
+#include "crt_frag.h"
 
 // Internal sentinel for upFrame.mode: high-quality supersampling downscale.
 // (Not a user-selectable upscalerMode; gated by the hqDownscale flag.)
@@ -100,6 +105,16 @@ VulkanRendererContext::~VulkanRendererContext() {
     if (casPipelineSwap   != VK_NULL_HANDLE) vk_.DestroyPipeline(device, casPipelineSwap, nullptr);
     if (hdrPipelineOff    != VK_NULL_HANDLE) vk_.DestroyPipeline(device, hdrPipelineOff, nullptr);
     if (hdrPipelineSwap   != VK_NULL_HANDLE) vk_.DestroyPipeline(device, hdrPipelineSwap, nullptr);
+    if (fxaaPipelineOff   != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fxaaPipelineOff, nullptr);
+    if (fxaaPipelineSwap  != VK_NULL_HANDLE) vk_.DestroyPipeline(device, fxaaPipelineSwap, nullptr);
+    if (toonPipelineOff   != VK_NULL_HANDLE) vk_.DestroyPipeline(device, toonPipelineOff, nullptr);
+    if (toonPipelineSwap  != VK_NULL_HANDLE) vk_.DestroyPipeline(device, toonPipelineSwap, nullptr);
+    if (colorPipelineOff  != VK_NULL_HANDLE) vk_.DestroyPipeline(device, colorPipelineOff, nullptr);
+    if (colorPipelineSwap != VK_NULL_HANDLE) vk_.DestroyPipeline(device, colorPipelineSwap, nullptr);
+    if (ntscPipelineOff   != VK_NULL_HANDLE) vk_.DestroyPipeline(device, ntscPipelineOff, nullptr);
+    if (ntscPipelineSwap  != VK_NULL_HANDLE) vk_.DestroyPipeline(device, ntscPipelineSwap, nullptr);
+    if (crtPipelineOff    != VK_NULL_HANDLE) vk_.DestroyPipeline(device, crtPipelineOff, nullptr);
+    if (crtPipelineSwap   != VK_NULL_HANDLE) vk_.DestroyPipeline(device, crtPipelineSwap, nullptr);
     if (postPipeLayout    != VK_NULL_HANDLE) vk_.DestroyPipelineLayout(device, postPipeLayout, nullptr);
     if (offscreenRenderPass != VK_NULL_HANDLE) vk_.DestroyRenderPass(device, offscreenRenderPass, nullptr);
     if (upscaleSampler    != VK_NULL_HANDLE) vk_.DestroySampler(device, upscaleSampler, nullptr);
@@ -552,6 +567,17 @@ void VulkanRendererContext::createPostPipelines() {
     casPipelineSwap = createPostPipeline(cas_code, sizeof(cas_code), renderPass);
     hdrPipelineOff  = createPostPipeline(hdr_code, sizeof(hdr_code), offscreenRenderPass);
     hdrPipelineSwap = createPostPipeline(hdr_code, sizeof(hdr_code), renderPass);
+    // Phase 2 screen effects: same Off/Swap variant pair as CAS/HDR.
+    fxaaPipelineOff   = createPostPipeline(fxaa_code,  sizeof(fxaa_code),  offscreenRenderPass);
+    fxaaPipelineSwap  = createPostPipeline(fxaa_code,  sizeof(fxaa_code),  renderPass);
+    toonPipelineOff   = createPostPipeline(toon_code,  sizeof(toon_code),  offscreenRenderPass);
+    toonPipelineSwap  = createPostPipeline(toon_code,  sizeof(toon_code),  renderPass);
+    colorPipelineOff  = createPostPipeline(color_code, sizeof(color_code), offscreenRenderPass);
+    colorPipelineSwap = createPostPipeline(color_code, sizeof(color_code), renderPass);
+    ntscPipelineOff   = createPostPipeline(ntsc_code,  sizeof(ntsc_code),  offscreenRenderPass);
+    ntscPipelineSwap  = createPostPipeline(ntsc_code,  sizeof(ntsc_code),  renderPass);
+    crtPipelineOff    = createPostPipeline(crt_code,   sizeof(crt_code),   offscreenRenderPass);
+    crtPipelineSwap   = createPostPipeline(crt_code,   sizeof(crt_code),   renderPass);
 }
 
 bool VulkanRendererContext::createColorTarget(int w, int h, VkImage& img, VkDeviceMemory& mem,
@@ -1163,22 +1189,36 @@ void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t img
         curDS = fx1DS;
     }
 
-    // ---- Effect chain: CAS then HDR. The last effect writes the swapchain; earlier
-    //      ones ping-pong between fx1 and fx2 (both at swapchain resolution).
-    int effects[2]; int n=0;
-    if (upFrame.cas) effects[n++]=0;   // 0 = CAS
-    if (upFrame.hdr) effects[n++]=1;   // 1 = HDR
+    // ---- Effect chain in the LOCKED canonical order:
+    //          FXAA -> Toon -> Color -> CAS -> HDR -> NTSC -> CRT
+    //      (AA first, stylize/grade the clean image, sharpen, bloom, then the
+    //       output-medium emulation last: analog NTSC signal, then the CRT tube.)
+    //      The last active effect writes the swapchain; earlier ones ping-pong
+    //      between fx1 and fx2 (2 buffers suffice for any chain length).
+    enum { FX_FXAA=0, FX_TOON, FX_COLOR, FX_CAS, FX_HDR, FX_NTSC, FX_CRT };
+    int effects[7]; int n=0;
+    if (upFrame.fxaa)  effects[n++]=FX_FXAA;
+    if (upFrame.toon)  effects[n++]=FX_TOON;
+    if (upFrame.color) effects[n++]=FX_COLOR;
+    if (upFrame.cas)   effects[n++]=FX_CAS;
+    if (upFrame.hdr)   effects[n++]=FX_HDR;
+    if (upFrame.ntsc)  effects[n++]=FX_NTSC;
+    if (upFrame.crt)   effects[n++]=FX_CRT;
     for (int i=0;i<n;i++) {
-        const bool last   = (i==n-1);
-        const bool toSwap = last;
+        const bool toSwap = (i==n-1);
         VkFramebuffer tgtFB; VkDescriptorSet tgtDS;
         if (toSwap)               { tgtFB=swapchainFBs[imgIdx]; tgtDS=VK_NULL_HANDLE; }
         else if (curDS==fx1DS)    { tgtFB=fx2FB; tgtDS=fx2DS; }
         else                      { tgtFB=fx1FB; tgtDS=fx1DS; }
-        if (effects[i]==0)
-            postPass(toSwap?casPipelineSwap:casPipelineOff, tgtFB, toSwap, curDS, &upFrame.casPC, sizeof(upFrame.casPC));
-        else
-            postPass(toSwap?hdrPipelineSwap:hdrPipelineOff, tgtFB, toSwap, curDS, &upFrame.hdrPC, sizeof(upFrame.hdrPC));
+        switch (effects[i]) {
+            case FX_FXAA:  postPass(toSwap?fxaaPipelineSwap :fxaaPipelineOff,  tgtFB, toSwap, curDS, &upFrame.fxaaPC,  sizeof(upFrame.fxaaPC));  break;
+            case FX_TOON:  postPass(toSwap?toonPipelineSwap :toonPipelineOff,  tgtFB, toSwap, curDS, &upFrame.toonPC,  sizeof(upFrame.toonPC));  break;
+            case FX_COLOR: postPass(toSwap?colorPipelineSwap:colorPipelineOff, tgtFB, toSwap, curDS, &upFrame.colorPC, sizeof(upFrame.colorPC)); break;
+            case FX_CAS:   postPass(toSwap?casPipelineSwap  :casPipelineOff,   tgtFB, toSwap, curDS, &upFrame.casPC,   sizeof(upFrame.casPC));   break;
+            case FX_HDR:   postPass(toSwap?hdrPipelineSwap  :hdrPipelineOff,   tgtFB, toSwap, curDS, &upFrame.hdrPC,   sizeof(upFrame.hdrPC));   break;
+            case FX_NTSC:  postPass(toSwap?ntscPipelineSwap :ntscPipelineOff,  tgtFB, toSwap, curDS, &upFrame.ntscPC,  sizeof(upFrame.ntscPC));  break;
+            case FX_CRT:   postPass(toSwap?crtPipelineSwap  :crtPipelineOff,   tgtFB, toSwap, curDS, &upFrame.crtPC,   sizeof(upFrame.crtPC));   break;
+        }
         if (!toSwap) curDS = tgtDS;
     }
 }
@@ -1188,12 +1228,19 @@ void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t img
 // before recordCmdBuf. Resources are (re)created here as needed.
 void VulkanRendererContext::planUpscaleFrame() {
     upFrame.active=false;
-    upFrame.cas = casEnabled;
-    upFrame.hdr = hdrEnabled;
+    upFrame.cas  = casEnabled;
+    upFrame.hdr  = hdrEnabled;
+    upFrame.fxaa = fxaaEnabled;
+    upFrame.toon = toonEnabled;
+    upFrame.color= colorEnabled;
+    upFrame.ntsc = ntscEnabled;
+    upFrame.crt  = crtEnabled;
     if (containerWidth<=0 || containerHeight<=0) return;
     if (swapchain==VK_NULL_HANDLE) return;
 
-    const bool fxOn = casEnabled || hdrEnabled;
+    // Any of the 7 composable effects engages the post chain (even at mode 0/1/2).
+    const bool fxOn = casEnabled || hdrEnabled || fxaaEnabled || toonEnabled ||
+                      colorEnabled || ntscEnabled || crtEnabled;
     const float scW=(float)swapchainExt.width, scH=(float)swapchainExt.height;
     const bool renderAboveDisplay =
         ((int)swapchainExt.width<containerWidth || (int)swapchainExt.height<containerHeight);
@@ -1287,29 +1334,63 @@ void VulkanRendererContext::planUpscaleFrame() {
         upFrame.outW=(int)swapchainExt.width; upFrame.outH=(int)swapchainExt.height;
     }
 
-    // ---- Ensure the effect-chain intermediates and pack the CAS/HDR push constants.
+    // ---- Ensure the effect-chain intermediates and pack each effect's push const.
     if (fxOn && upFrame.active) {
         const int fw=(int)swapchainExt.width, fh=(int)swapchainExt.height;
-        const int nEffects=(casEnabled?1:0)+(hdrEnabled?1:0);
+        const int nEffects=(int)fxaaEnabled+(int)toonEnabled+(int)colorEnabled+
+                           (int)casEnabled+(int)hdrEnabled+(int)ntscEnabled+(int)crtEnabled;
         bool ok = ensureFx1(fw,fh) && (nEffects<2 || ensureFx2(fw,fh));
         if (!ok) {
             // Out of memory for the fx targets: skip effects this frame. Keep the
             // scaling pass if there was one; otherwise fall back to the direct path.
-            upFrame.cas=false; upFrame.hdr=false;
+            upFrame.cas=upFrame.hdr=upFrame.fxaa=upFrame.toon=
+                upFrame.color=upFrame.ntsc=upFrame.crt=false;
             if (!scaling) upFrame.active=false;
             return;
         }
+        // Every effect's full-target quad spans the whole swapchain (NDC -1..1).
+        const float full[4]={-1.f,-1.f,1.f,1.f};
+        if (fxaaEnabled) {
+            FxaaPushConstants& f=upFrame.fxaaPC;
+            f.ndc[0]=full[0]; f.ndc[1]=full[1]; f.ndc[2]=full[2]; f.ndc[3]=full[3];
+            f.resolution[0]=(float)fw; f.resolution[1]=(float)fh;
+        }
+        if (toonEnabled) {
+            ToonPushConstants& t=upFrame.toonPC;
+            t.ndc[0]=full[0]; t.ndc[1]=full[1]; t.ndc[2]=full[2]; t.ndc[3]=full[3];
+            t.resolution[0]=(float)fw; t.resolution[1]=(float)fh;
+        }
+        if (colorEnabled) {
+            ColorPushConstants& c=upFrame.colorPC;
+            c.ndc[0]=full[0]; c.ndc[1]=full[1]; c.ndc[2]=full[2]; c.ndc[3]=full[3];
+            c.brightness=colorBrightness; c.contrast=colorContrast; c.gamma=colorGamma;
+        }
         if (casEnabled) {
             CasPushConstants& c=upFrame.casPC;
-            c.ndc[0]=-1.f; c.ndc[1]=-1.f; c.ndc[2]=1.f; c.ndc[3]=1.f;
+            c.ndc[0]=full[0]; c.ndc[1]=full[1]; c.ndc[2]=full[2]; c.ndc[3]=full[3];
             c.resolution[0]=(float)fw; c.resolution[1]=(float)fh;
             int s = casSharpness; if (s<0) s=0; if (s>100) s=100;
             c.sharpness = (float)s / 100.0f;     // higher slider = stronger sharpen
         }
         if (hdrEnabled) {
             HdrPushConstants& h=upFrame.hdrPC;
-            h.ndc[0]=-1.f; h.ndc[1]=-1.f; h.ndc[2]=1.f; h.ndc[3]=1.f;
+            h.ndc[0]=full[0]; h.ndc[1]=full[1]; h.ndc[2]=full[2]; h.ndc[3]=full[3];
             h.resolution[0]=(float)fw; h.resolution[1]=(float)fh;
+        }
+        if (ntscEnabled) {
+            NtscPushConstants& nt=upFrame.ntscPC;
+            nt.ndc[0]=full[0]; nt.ndc[1]=full[1]; nt.ndc[2]=full[2]; nt.ndc[3]=full[3];
+            nt.resolution[0]=(float)fw; nt.resolution[1]=(float)fh;
+            // cos/sin(chromaPhase*0.5) has integer-FrameCount period 4 -> mod 4 keeps
+            // the analog shimmer byte-identical to an unbounded counter, with no float
+            // precision loss. Advance only when NTSC is actually running.
+            nt.frameCount = (float)(ntscFrameCounter & 3u);
+            ntscFrameCounter++;
+        }
+        if (crtEnabled) {
+            CrtPushConstants& cr=upFrame.crtPC;
+            cr.ndc[0]=full[0]; cr.ndc[1]=full[1]; cr.ndc[2]=full[2]; cr.ndc[3]=full[3];
+            cr.resolution[0]=(float)fw; cr.resolution[1]=(float)fh;
         }
     }
 }
@@ -1774,6 +1855,48 @@ void VulkanRendererContext::setHdr(bool enabled) {
     if (hdrEnabled==enabled) return;
     RLOG("setHdr: %d -> %d", (int)hdrEnabled, (int)enabled);
     hdrEnabled=enabled;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setFxaa(bool enabled) {
+    if (fxaaEnabled==enabled) return;
+    RLOG("setFxaa: %d -> %d", (int)fxaaEnabled, (int)enabled);
+    fxaaEnabled=enabled;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setToon(bool enabled) {
+    if (toonEnabled==enabled) return;
+    RLOG("setToon: %d -> %d", (int)toonEnabled, (int)enabled);
+    toonEnabled=enabled;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setCrt(bool enabled) {
+    if (crtEnabled==enabled) return;
+    RLOG("setCrt: %d -> %d", (int)crtEnabled, (int)enabled);
+    crtEnabled=enabled;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setNtsc(bool enabled) {
+    if (ntscEnabled==enabled) return;
+    RLOG("setNtsc: %d -> %d", (int)ntscEnabled, (int)enabled);
+    ntscEnabled=enabled;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+// Color grade: inputs are GL slider values (brightness/contrast -100..100, gamma
+// 0.5..3.0). Replicate ColorEffect: map slider/100 then apply ColorEffectMaterial.use()
+// clamps; "enabled" only when not at the neutral (0,0,1) grade (GL removes it then).
+void VulkanRendererContext::setColorGrade(float brightness, float contrast, float gamma) {
+    bool enabled = !(brightness==0.0f && contrast==0.0f && gamma==1.0f);
+    float b = brightness / 100.0f; if (b<-1.0f) b=-1.0f; if (b>1.0f) b=1.0f;
+    float c = contrast   / 100.0f; if (c< 0.0f) c= 0.0f; if (c>2.0f) c=2.0f;
+    float g = gamma;               if (g< 0.1f) g= 0.1f; if (g>5.0f) g=5.0f;
+    if (colorEnabled==enabled && colorBrightness==b && colorContrast==c && colorGamma==g) return;
+    RLOG("setColorGrade: en=%d b=%.3f c=%.3f g=%.3f", (int)enabled, b, c, g);
+    colorEnabled=enabled; colorBrightness=b; colorContrast=c; colorGamma=g;
     needsRender.store(true); dirtyCV.notify_one();
 }
 

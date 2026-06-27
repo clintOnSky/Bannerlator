@@ -148,6 +148,31 @@ struct HdrPushConstants {                  // 24 bytes
     float ndc[4];
     float resolution[2];                   // input texture size in px
 };
+// Phase 2 screen effects ported from the GL EffectComposer. Each leads with vec4
+// ndc (offset 0) like the upscaler PCs and stays well under the 88-byte PC range.
+struct FxaaPushConstants {                 // 24 bytes
+    float ndc[4];
+    float resolution[2];                   // input texture size in px
+};
+struct ToonPushConstants {                 // 24 bytes
+    float ndc[4];
+    float resolution[2];                   // input texture size in px
+};
+struct ColorPushConstants {                // 28 bytes
+    float ndc[4];
+    float brightness;                      // additive [-1,1]
+    float contrast;                        // [0,2]
+    float gamma;                           // [0.1,5]
+};
+struct NtscPushConstants {                 // 28 bytes
+    float ndc[4];
+    float resolution[2];                   // screen size in px (TextureSize/resolution)
+    float frameCount;                      // animated chroma-phase counter
+};
+struct CrtPushConstants {                  // 24 bytes
+    float ndc[4];
+    float resolution[2];                   // input texture size in px (unused by shader)
+};
 
 class VulkanRendererContext {
 public:
@@ -202,6 +227,11 @@ public:
     void setCas(bool enabled, int sharpness);
     void setHdr(bool enabled);
     void setUpscaleSharpness(int sharpness);
+    void setFxaa(bool enabled);
+    void setToon(bool enabled);
+    void setCrt(bool enabled);
+    void setNtsc(bool enabled);
+    void setColorGrade(float brightness, float contrast, float gamma);
     void setSwapRB(bool enabled);
     void setPresentMode(VkPresentModeKHR mode);
     std::vector<int> getSupportedPresentModes() const;
@@ -364,6 +394,19 @@ private:
     bool              hdrEnabled        = false;
     float             upscaleSharpnessStops = 0.25f; // RCAS stops; SGSR edge derived
 
+    // Phase 2 screen effects (GL EffectComposer parity). FXAA/Toon/CRT/NTSC are
+    // binary; Color is the brightness/contrast/gamma grade (always-applied via the
+    // sliders, no toggle) and is "enabled" only when not at neutral (0,0,1).
+    bool              fxaaEnabled       = false;
+    bool              toonEnabled       = false;
+    bool              crtEnabled        = false;
+    bool              ntscEnabled       = false;
+    bool              colorEnabled      = false;   // derived: !neutral grade
+    float             colorBrightness   = 0.0f;    // [-1,1] (slider/100, clamped)
+    float             colorContrast     = 0.0f;    // [0,2]  (slider/100, clamped)
+    float             colorGamma        = 1.0f;    // [0.1,5]
+    uint32_t          ntscFrameCounter  = 0;       // animates NTSC chroma phase
+
     VkSampler         upscaleSampler    = VK_NULL_HANDLE; // linear clamp; offscreen/mid input
     VkFormat          offscreenFmt      = VK_FORMAT_R8G8B8A8_UNORM;
     VkRenderPass      offscreenRenderPass = VK_NULL_HANDLE; // CLEAR -> SHADER_READ_ONLY
@@ -379,6 +422,17 @@ private:
     VkPipeline        casPipelineSwap   = VK_NULL_HANDLE; // -> swapchain (renderPass)
     VkPipeline        hdrPipelineOff    = VK_NULL_HANDLE;
     VkPipeline        hdrPipelineSwap   = VK_NULL_HANDLE;
+    // Phase 2 effects: same Off (-> fx target) / Swap (-> swapchain) variant pair.
+    VkPipeline        fxaaPipelineOff   = VK_NULL_HANDLE;
+    VkPipeline        fxaaPipelineSwap  = VK_NULL_HANDLE;
+    VkPipeline        toonPipelineOff   = VK_NULL_HANDLE;
+    VkPipeline        toonPipelineSwap  = VK_NULL_HANDLE;
+    VkPipeline        colorPipelineOff  = VK_NULL_HANDLE;
+    VkPipeline        colorPipelineSwap = VK_NULL_HANDLE;
+    VkPipeline        ntscPipelineOff   = VK_NULL_HANDLE;
+    VkPipeline        ntscPipelineSwap  = VK_NULL_HANDLE;
+    VkPipeline        crtPipelineOff    = VK_NULL_HANDLE;
+    VkPipeline        crtPipelineSwap   = VK_NULL_HANDLE;
 
     // offscreen composite target @ game/container resolution
     VkImage           offscreenImg  = VK_NULL_HANDLE;
@@ -421,12 +475,22 @@ private:
         int  outX = 0, outY = 0, outW = 0, outH = 0;
         bool cas = false;   // run CAS this frame (snapshot of casEnabled)
         bool hdr = false;   // run HDR this frame (snapshot of hdrEnabled)
+        bool fxaa = false;  // snapshot of fxaaEnabled
+        bool toon = false;  // snapshot of toonEnabled
+        bool color = false; // snapshot of colorEnabled (non-neutral grade)
+        bool ntsc = false;  // snapshot of ntscEnabled
+        bool crt = false;   // snapshot of crtEnabled
         SgsrPushConstants      sgsrPC{};
         EasuPushConstants      easuPC{};
         RcasPushConstants      rcasPC{};
         DownscalePushConstants dsPC{};
         CasPushConstants       casPC{};
         HdrPushConstants       hdrPC{};
+        FxaaPushConstants      fxaaPC{};
+        ToonPushConstants      toonPC{};
+        ColorPushConstants     colorPC{};
+        NtscPushConstants      ntscPC{};
+        CrtPushConstants       crtPC{};
     } upFrame;
 
     VkCommandPool                cmdPool = VK_NULL_HANDLE;

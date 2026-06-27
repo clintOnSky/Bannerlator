@@ -110,6 +110,46 @@ object XServerDialogState {
     @JvmField var onUpscaleSharpnessApply: UpscaleSharpnessCallback? = null
 
     // -------------------------------------------------------------------------
+    // Vulkan Phase 2 screen effects (GL EffectComposer parity): Color grade
+    // (brightness/contrast/gamma sliders) + FXAA/Toon/CRT/NTSC toggles. Drawer-only
+    // / session-live, same lifecycle as the scaling mode + CAS/HDR.
+    // -------------------------------------------------------------------------
+    private val _vkBrightness = MutableStateFlow(0f)       // -100..100, 0 = neutral
+    val vkBrightness: StateFlow<Float> = _vkBrightness
+    fun setVkBrightness(v: Float) { _vkBrightness.value = v }
+
+    private val _vkContrast = MutableStateFlow(0f)         // -100..100, 0 = neutral
+    val vkContrast: StateFlow<Float> = _vkContrast
+    fun setVkContrast(v: Float) { _vkContrast.value = v }
+
+    private val _vkGamma = MutableStateFlow(1.0f)          // 0.5..3.0, 1.0 = neutral
+    val vkGamma: StateFlow<Float> = _vkGamma
+    fun setVkGamma(v: Float) { _vkGamma.value = v }
+
+    private val _vkFxaa = MutableStateFlow(false)
+    val vkFxaa: StateFlow<Boolean> = _vkFxaa
+    fun setVkFxaa(v: Boolean) { _vkFxaa.value = v }
+
+    private val _vkToon = MutableStateFlow(false)
+    val vkToon: StateFlow<Boolean> = _vkToon
+    fun setVkToon(v: Boolean) { _vkToon.value = v }
+
+    private val _vkCrt = MutableStateFlow(false)
+    val vkCrt: StateFlow<Boolean> = _vkCrt
+    fun setVkCrt(v: Boolean) { _vkCrt.value = v }
+
+    private val _vkNtsc = MutableStateFlow(false)
+    val vkNtsc: StateFlow<Boolean> = _vkNtsc
+    fun setVkNtsc(v: Boolean) { _vkNtsc.value = v }
+
+    // Single applier mirroring the GL onScreenEffectsApply signature.
+    fun interface VulkanScreenEffectsCallback {
+        fun invoke(brightness: Float, contrast: Float, gamma: Float,
+                   fxaa: Boolean, toon: Boolean, crt: Boolean, ntsc: Boolean)
+    }
+    @JvmField var onVulkanScreenEffectsApply: VulkanScreenEffectsCallback? = null
+
+    // -------------------------------------------------------------------------
     // Vibration dialog
     // -------------------------------------------------------------------------
     private val _vibrationSlots = MutableStateFlow<List<Pair<String, Boolean>>>(emptyList())
@@ -319,6 +359,13 @@ object XServerDialogState {
         _casSharpness.value    = 60
         _hdrVkEnabled.value    = false
         _upscaleSharpness.value = 75
+        _vkBrightness.value    = 0f
+        _vkContrast.value      = 0f
+        _vkGamma.value         = 1.0f
+        _vkFxaa.value          = false
+        _vkToon.value          = false
+        _vkCrt.value           = false
+        _vkNtsc.value          = false
         _vibrationSlots.value  = emptyList()
         _logLines.value        = emptyList()
         _logPaused.value       = false
@@ -347,6 +394,7 @@ object XServerDialogState {
         onSgsrUpdate = null
         onUpscalerApply = null
         onCasApply = null; onHdrApply = null; onUpscaleSharpnessApply = null
+        onVulkanScreenEffectsApply = null
         onVibrationSlotChanged = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null

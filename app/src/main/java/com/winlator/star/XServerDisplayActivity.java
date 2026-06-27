@@ -1703,6 +1703,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDialogState.INSTANCE.setCasEnabled(false);
             XServerDialogState.INSTANCE.setCasSharpness(60);
             XServerDialogState.INSTANCE.setHdrVkEnabled(false);
+            // Phase 2 screen effects (GL parity) — drawer-only / session-live, default
+            // off / neutral grade. Seed the renderer and mirror into the drawer state.
+            vkRenderer.setScreenEffects(0f, 0f, 1.0f, false, false, false, false);
+            XServerDialogState.INSTANCE.setVkBrightness(0f);
+            XServerDialogState.INSTANCE.setVkContrast(0f);
+            XServerDialogState.INSTANCE.setVkGamma(1.0f);
+            XServerDialogState.INSTANCE.setVkFxaa(false);
+            XServerDialogState.INSTANCE.setVkToon(false);
+            XServerDialogState.INSTANCE.setVkCrt(false);
+            XServerDialogState.INSTANCE.setVkNtsc(false);
             vkRenderer.setSwapRB(container.getRendererSwapRB());
             // Must run before the surface is created so onSurfaceCreated sets up the scanout path.
             boolean nativeOn = container.isRendererNative();
@@ -1853,11 +1863,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.onCasApply = (enabled, sharpness) -> vkr.setCas(enabled, sharpness);
             ds.onHdrApply = (enabled) -> vkr.setHdr(enabled);
             ds.onUpscaleSharpnessApply = (sharpness) -> vkr.setUpscaleSharpness(sharpness);
+            ds.onVulkanScreenEffectsApply = (brightness, contrast, gamma, fxaa, toon, crt, ntsc) ->
+                vkr.setScreenEffects(brightness, contrast, gamma, fxaa, toon, crt, ntsc);
         } else {
             ds.onUpscalerApply = null;
             ds.onCasApply = null;
             ds.onHdrApply = null;
             ds.onUpscaleSharpnessApply = null;
+            ds.onVulkanScreenEffectsApply = null;
         }
 
         // Input Controls state (renderer-independent: controller profiles + vibration work on
