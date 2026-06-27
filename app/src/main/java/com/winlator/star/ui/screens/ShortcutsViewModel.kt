@@ -49,11 +49,6 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     private val _isGridView = MutableStateFlow(prefs.getBoolean("is_grid_view", false))
     val isGridView: StateFlow<Boolean> = _isGridView
 
-    // List-view card style: false = layout A (poster + wrapping chips),
-    // true = layout L (primary chips + muted secondary line). Issue #19.
-    private val _useLayoutL = MutableStateFlow(prefs.getBoolean("list_card_layout_l", false))
-    val useLayoutL: StateFlow<Boolean> = _useLayoutL
-
     val shortcuts: kotlinx.coroutines.flow.Flow<List<Shortcut>> =
         combine(_shortcuts, _sortOrder) { list, order ->
             when (order) {
@@ -77,11 +72,6 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     fun setGridView(grid: Boolean) {
         _isGridView.value = grid
         prefs.edit().putBoolean("is_grid_view", grid).apply()
-    }
-
-    fun setUseLayoutL(useL: Boolean) {
-        _useLayoutL.value = useL
-        prefs.edit().putBoolean("list_card_layout_l", useL).apply()
     }
 
     fun importShortcut(containerIndex: Int, uri: Uri, context: Context): ImportResult {

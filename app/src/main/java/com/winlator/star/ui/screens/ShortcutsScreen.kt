@@ -165,7 +165,6 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     val shortcuts by vm.shortcuts.collectAsState(initial = emptyList())
     val sortOrder by vm.sortOrder.collectAsState()
     val isGridView by vm.isGridView.collectAsState()
-    val useLayoutL by vm.useLayoutL.collectAsState()
     val context = LocalContext.current
     val activity = context as Activity
 
@@ -206,7 +205,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // first and runs first (clears); we enqueue second and run after (sets). A
     // SideEffect would run synchronously during commit, getting steamrolled by the
     // parent's clear when it fires post-commit.
-    LaunchedEffect(isGridView, useLayoutL) {
+    LaunchedEffect(isGridView) {
         topBarActions.value = {
             IconButton(onClick = { vm.setGridView(!isGridView) }) {
                 Icon(
@@ -214,17 +213,6 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     contentDescription = if (isGridView) "List view" else "Grid view",
                     tint = androidx.compose.ui.graphics.Color.White,
                 )
-            }
-            // List-card style chooser (layout A ↔ L) — only meaningful in list view.
-            if (!isGridView) {
-                IconButton(onClick = { vm.setUseLayoutL(!useLayoutL) }) {
-                    Text(
-                        text = if (useLayoutL) "L" else "A",
-                        color = androidx.compose.ui.graphics.Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                    )
-                }
             }
             Box {
                 IconButton(onClick = { showSortMenu = true }) {
@@ -336,29 +324,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 val itemAddToHome = { addToHomeScreen(context, shortcut) }
                                 val itemExport = { exportShortcut(context, shortcut) }
                                 val itemProperties = { propertiesShortcut = shortcut }
-                                if (useLayoutL) {
-                                    ShortcutItemLayoutL(
-                                        shortcut = shortcut,
-                                        onRun = itemRun,
-                                        onSettings = itemSettings,
-                                        onRemove = itemRemove,
-                                        onClone = itemClone,
-                                        onAddToHome = itemAddToHome,
-                                        onExport = itemExport,
-                                        onProperties = itemProperties,
-                                    )
-                                } else {
-                                    ShortcutItem(
-                                        shortcut = shortcut,
-                                        onRun = itemRun,
-                                        onSettings = itemSettings,
-                                        onRemove = itemRemove,
-                                        onClone = itemClone,
-                                        onAddToHome = itemAddToHome,
-                                        onExport = itemExport,
-                                        onProperties = itemProperties,
-                                    )
-                                }
+                                ShortcutItemLayoutL(
+                                    shortcut = shortcut,
+                                    onRun = itemRun,
+                                    onSettings = itemSettings,
+                                    onRemove = itemRemove,
+                                    onClone = itemClone,
+                                    onAddToHome = itemAddToHome,
+                                    onExport = itemExport,
+                                    onProperties = itemProperties,
+                                )
                                 Divider(color = DividerColor)
                             }
                         }
@@ -617,114 +592,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 }
 
-// Layout A (poster thumbnail + wrapping component chips). A tall 3:4 cover on the
-// left, name + container in the middle, and the graphics components as colour-coded
-// chips that wrap onto their own line(s) — so a long DXVK/VKD3D version string grows
-// the row taller instead of blanking the title or hiding the overflow menu (issue #19).
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ShortcutItem(
-    shortcut: Shortcut,
-    onRun: () -> Unit,
-    onSettings: () -> Unit,
-    onRemove: () -> Unit,
-    onClone: () -> Unit,
-    onAddToHome: () -> Unit,
-    onExport: () -> Unit,
-    onProperties: () -> Unit,
-) {
-    // Resolved component metadata (shortcut override → container default).
-    val resolution = shortcut.getExtra("screenSize", shortcut.container?.getScreenSize() ?: "")
-    val driverCfg = shortcut.getExtra("graphicsDriverConfig", shortcut.container?.getGraphicsDriverConfig() ?: "")
-    val driverLabel = if (driverCfg.isNotEmpty()) GraphicsDriverConfigDialog.getVersion(driverCfg) else ""
-    val dxwrapperCfg = shortcut.getExtra("dxwrapperConfig", shortcut.container?.getDXWrapperConfig() ?: "")
-    val cfgMap = dxwrapperCfg.split(",").mapNotNull {
-        val parts = it.split("=", limit = 2)
-        if (parts.size == 2) parts[0].trim() to parts[1].trim() else null
-    }.toMap()
-    val dxvkVersion = cfgMap["version"] ?: ""
-    val vkd3dVersion = cfgMap["vkd3dVersion"] ?: ""
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceColor)
-            .clickable(onClick = onRun)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    ) {
-        // 3:4 poster cover (same bitmap the grid view uses); fall back to a glyph tile.
-        Box(
-            modifier = Modifier
-                .size(width = 48.dp, height = 64.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(SurfaceVariantColor),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (shortcut.icon != null) {
-                Image(
-                    bitmap = shortcut.icon.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Filled.OpenInNew,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = shortcut.name,
-                style = MaterialTheme.typography.bodyLarge,
-                color = OnSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (!shortcut.container?.name.isNullOrEmpty()) {
-                Text(
-                    text = shortcut.container?.name ?: "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            val hasChips = resolution.isNotEmpty() || driverLabel.isNotEmpty() ||
-                dxvkVersion.isNotEmpty() || vkd3dVersion.isNotEmpty()
-            if (hasChips) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(top = 6.dp),
-                ) {
-                    if (resolution.isNotEmpty()) CompChip(resolution, ChipResColor)
-                    if (driverLabel.isNotEmpty()) CompChip(driverLabel, ChipDriverColor)
-                    if (dxvkVersion.isNotEmpty()) CompChip("DXVK $dxvkVersion", ChipDxvkColor)
-                    if (vkd3dVersion.isNotEmpty()) CompChip("VKD3D $vkd3dVersion", ChipVkd3dColor)
-                }
-            }
-        }
-        ShortcutOverflowButton(
-            onSettings = onSettings,
-            onRemove = onRemove,
-            onClone = onClone,
-            onAddToHome = onAddToHome,
-            onExport = onExport,
-            onProperties = onProperties,
-        )
-    }
-}
-
-// Layout L (primary chips + muted secondary line, issue #19). Same poster cover as A,
-// but the components are split by how often you check them: renderer, DXVK and frame-gen
-// are bright chips; driver, VKD3D, x86 backend and audio sit on a calm muted line with a
-// colour dot each. Resolution rides in the container subtitle. "Calm but complete."
+// Game-list card (poster cover + primary chips + muted secondary line, issue #19). A tall
+// 3:4 cover on the left, name + container · resolution subtitle in the middle. Components are
+// split by how often you check them: renderer, DXVK and frame-gen are bright chips; driver,
+// VKD3D and x86 backend sit on a calm muted line with a colour dot each. "Calm but complete."
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ShortcutItemLayoutL(
@@ -864,8 +735,7 @@ private fun ShortcutItemLayoutL(
     }
 }
 
-// Colour-coded component chips for the list-view cards (layouts A and L).
-private val ChipResColor = Color(0xFF7FB2FF)
+// Colour-coded component chips for the list-view game cards.
 private val ChipRendColor = Color(0xFF36D1DC)
 private val ChipDriverColor = Color(0xFFFFB02E)
 private val ChipDxvkColor = Color(0xFF5BD6A6)
