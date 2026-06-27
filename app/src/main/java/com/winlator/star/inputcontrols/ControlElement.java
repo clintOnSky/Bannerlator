@@ -749,6 +749,12 @@ public class ControlElement {
                 ? Color.argb(textAlpha, Color.red(accent), Color.green(accent), Color.blue(accent))
                 : Color.argb(textAlpha, 0x1C, 0x85, 0xFE);
 
+        // Drop shadow alpha must track opacity too — otherwise the fixed-alpha blue glow
+        // (0x40) keeps showing through at low opacity, reading as a solid blue fill on the
+        // compact SQUARE keys (MRB/BKSP/SPACE/ENTER) while their fill/stroke/text fade out.
+        int shadowAlpha = (int) (0x40 * gameHubDim * effectiveOpacity);
+        int shadowColor = Color.argb(shadowAlpha, 0x1C, 0x85, 0xFE);
+
         if (selected && !hasAccent) {
             int highlightAlpha = (int) (255 * overlayOpacity);
             strokeColor = Color.argb(highlightAlpha, 2, 119, 189);
@@ -770,7 +776,7 @@ public class ControlElement {
                     GameHubLayout.buildTriggerPath(
                             path, triggerShape,
                             boundingBox.left, boundingBox.top, boundingBox.right, boundingBox.bottom);
-                    paint.setShadowLayer(snappingSize * 0.08f, 0, snappingSize * 0.04f, 0x401C85FE);
+                    paint.setShadowLayer(snappingSize * 0.08f, 0, snappingSize * 0.04f, shadowColor);
                     paint.setStyle(Paint.Style.FILL);
                     paint.setColor(fillColor);
                     canvas.drawPath(path, paint);
@@ -786,7 +792,7 @@ public class ControlElement {
                     paint.setColor(engaged ? pressedStrokeColor : strokeColor);
                     canvas.drawPath(path, paint);
                 } else {
-                    paint.setShadowLayer(snappingSize * 0.08f, 0, snappingSize * 0.04f, 0x401C85FE);
+                    paint.setShadowLayer(snappingSize * 0.08f, 0, snappingSize * 0.04f, shadowColor);
                     drawGameHubShape(canvas, paint, boundingBox, fillColor, true);
                     paint.setShadowLayer(0f, 0f, 0f, 0);
                     if (engaged) drawGameHubShape(canvas, paint, boundingBox, pressedFillColor, true);
