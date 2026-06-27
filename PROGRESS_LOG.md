@@ -33,7 +33,7 @@ black-box fix + Linear default scaling mode), pushed `origin/main`, deleted the 
 The full Vulkan graphics program (P1 / P1b / P1c CAS+HDR / P2 effects / native-mutex) is now all on main.
 
 **2. On-screen controls opacity bug FIXED** — `app/.../inputcontrols/ControlElement.java`, commit `1d9439e` on
-main, CI run `28294667670`. **Device-test PENDING.**
+main, CI run `28294667670` ✅ GREEN (all 3 flavors). **Device-test PENDING.**
 - *Symptom (user, device screenshots 100% vs 6%):* at low Overlay Opacity the A–F keyboard strip fades fully, but
   the 4 compact keys MRB/BKSP/SPACE/ENTER keep a solid blue filled square while only their label text fades.
 - *Root cause (pulled both screenshots to confirm):* NOT the fill paint — the GameHub `fillColor` already tracks
