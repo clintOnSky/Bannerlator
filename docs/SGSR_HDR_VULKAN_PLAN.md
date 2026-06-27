@@ -262,3 +262,18 @@ source comments without copying their code.
   `setHqDownscale(true)` (UPMODE_DOWNSCALE, engages when hqDownscale && render>display). DSR/OGSSAA-style. Mode enum now 0-6
   (6=sharpen) + separate `setHqDownscale(bool)`. ⚠️ compile-reviewed; CI pending; device-UNTESTED (2x≈4K internal on 1080p = VRAM
   + 81-tap Lanczos cost, allocation-guarded). NEXT: CI green → device-test (sub-native upscale modes + native sharpen + 1.5x SS).
+- 2026-06-27 — ✅ **PHASE 1/1b DEVICE-TESTED** (root bridge: `getlog --exec` screencap + `input tap`/keyevent; full driving
+  runbook in the device-bridge notes). Scene = "all-in-one Graphics test" **D3D11 Raymarch SDF** (Vulkan|DXVK ~190fps),
+  **720p container on 1080p panel**. Method: open drawer = `input keyevent 4` (BACK); **Pause btn (drawer left-rail ~70,825)
+  freezes the game frame but the compositor keeps re-upscaling** → switch Scaling-mode chips on the SAME frozen frame for a
+  clean A/B (2.5x edge crops via ImageMagick `magick`). RESULTS: **SGSR / FSR / FSR-Fit all visibly upscale** (crisper
+  silhouette + edge reconstruction vs None's soft blit); **live switching CONFIRMED** (None→SGSR changed the frozen frame).
+  None/Linear/Nearest ~identical on smooth SDF content (low-contrast for bilinear-vs-nearest, not a bug — direct-blit path).
+  The earlier "no live change" report = render scale 1.0 (game==panel res, nothing to upscale), exactly the diagnosis.
+- 2026-06-27 — 🐛➡️✅ **Sharpen (mode 6) was DEAD on device** (matched None). Root cause = `setUpscaler` clamp
+  `if(mode<0||mode>5)mode=0` (VulkanRendererContext.cpp) coercing 6→0 before it reached `upscalerMode`. **FIXED**: bump to
+  `>6` (rest of chain — planUpscaleFrame exemption + recordUpscalePasses→rcasPipeline — already handles 6). 🧹 Also **removed
+  the duplicate per-container filter-mode dropdown** from VulkanSettingsDialog (ContainerDetailScreen.kt) so the in-game drawer
+  "Scaling mode" is the sole live editor; KEPT `rendererFilterMode` (still seeds the drawer's launch default), render-scale
+  supersampling, and VKBasalt sharpness (distinct subsystems). Committed `0655d61`; CI build run `28285319367` (all 3 flavors).
+  NEXT after green: install → re-verify Sharpen activates at native res → then Render-scale 1.5x downscale check → Phase 2.
