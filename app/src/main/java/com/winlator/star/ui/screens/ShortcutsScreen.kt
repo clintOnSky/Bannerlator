@@ -35,7 +35,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.lazy.LazyColumn
@@ -139,6 +140,7 @@ import com.winlator.star.ui.theme.Divider as DividerColor
 import com.winlator.star.ui.theme.OnSurface
 import com.winlator.star.ui.theme.OnSurfaceVariant
 import com.winlator.star.ui.theme.Surface as SurfaceColor
+import com.winlator.star.ui.theme.SurfaceVariant as SurfaceVariantColor
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.widget.EnvVarsView
 import com.winlator.star.winhandler.WinHandler
@@ -582,6 +584,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 }
 
+// Layout A (poster thumbnail + wrapping component chips). A tall 3:4 cover on the
+// left, name + container in the middle, and the graphics components as colour-coded
+// chips that wrap onto their own line(s) — so a long DXVK/VKD3D version string grows
+// the row taller instead of blanking the title or hiding the overflow menu (issue #19).
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ShortcutItem(
     shortcut: Shortcut,
@@ -595,6 +602,18 @@ private fun ShortcutItem(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
+    // Resolved component metadata (shortcut override → container default).
+    val resolution = shortcut.getExtra("screenSize", shortcut.container?.getScreenSize() ?: "")
+    val driverCfg = shortcut.getExtra("graphicsDriverConfig", shortcut.container?.getGraphicsDriverConfig() ?: "")
+    val driverLabel = if (driverCfg.isNotEmpty()) GraphicsDriverConfigDialog.getVersion(driverCfg) else ""
+    val dxwrapperCfg = shortcut.getExtra("dxwrapperConfig", shortcut.container?.getDXWrapperConfig() ?: "")
+    val cfgMap = dxwrapperCfg.split(",").mapNotNull {
+        val parts = it.split("=", limit = 2)
+        if (parts.size == 2) parts[0].trim() to parts[1].trim() else null
+    }.toMap()
+    val dxvkVersion = cfgMap["version"] ?: ""
+    val vkd3dVersion = cfgMap["vkd3dVersion"] ?: ""
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -603,21 +622,31 @@ private fun ShortcutItem(
             .clickable(onClick = onRun)
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-        if (shortcut.icon != null) {
-            Image(
-                bitmap = shortcut.icon.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.size(40.dp),
-            )
-        } else {
-            Icon(
-                imageVector = Icons.Filled.OpenInNew,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(40.dp),
-            )
+        // 3:4 poster cover (same bitmap the grid view uses); fall back to a glyph tile.
+        Box(
+            modifier = Modifier
+                .size(width = 48.dp, height = 64.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(SurfaceVariantColor),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (shortcut.icon != null) {
+                Image(
+                    bitmap = shortcut.icon.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.OpenInNew,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
-        Spacer(modifier = Modifier.width(14.dp))
+        Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = shortcut.name,
@@ -626,43 +655,28 @@ private fun ShortcutItem(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = shortcut.container?.name ?: "",
-                style = MaterialTheme.typography.bodySmall,
-                color = OnSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        // Info column — resolution + driver/wrapper
-        val resolution = shortcut.getExtra("screenSize", shortcut.container?.getScreenSize() ?: "")
-        val driverCfg = shortcut.getExtra("graphicsDriverConfig", shortcut.container?.getGraphicsDriverConfig() ?: "")
-        val driverLabel = if (driverCfg.isNotEmpty()) GraphicsDriverConfigDialog.getVersion(driverCfg) else ""
-        val dxwrapperCfg = shortcut.getExtra("dxwrapperConfig", shortcut.container?.getDXWrapperConfig() ?: "")
-        val cfgMap = dxwrapperCfg.split(",").mapNotNull {
-            val parts = it.split("=", limit = 2)
-            if (parts.size == 2) parts[0].trim() to parts[1].trim() else null
-        }.toMap()
-        val dxvkVersion = cfgMap["version"] ?: ""
-        val vkd3dVersion = cfgMap["vkd3dVersion"] ?: ""
-        Column(
-            horizontalAlignment = Alignment.End,
-            // Bound the width so a long DXVK/VKD3D version string (e.g. a nightly with a
-            // commit id) can't grow unbounded, squeeze the weighted name column to 0
-            // ("name is empty") and shove the overflow menu off-screen (issue #19). But
-            // rather than clipping the version, give each component its own line and let
-            // it wrap to two lines — the row grows taller and everything stays readable.
-            modifier = Modifier.widthIn(max = 140.dp).padding(end = 4.dp),
-        ) {
-            val topLine = listOf(resolution, driverLabel).filter { it.isNotEmpty() }.joinToString(" · ")
-            if (topLine.isNotEmpty()) {
-                Text(topLine, fontSize = 10.sp, color = OnSurfaceVariant, textAlign = TextAlign.End, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (!shortcut.container?.name.isNullOrEmpty()) {
+                Text(
+                    text = shortcut.container?.name ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            if (dxvkVersion.isNotEmpty()) {
-                Text("DXVK $dxvkVersion", fontSize = 10.sp, color = OnSurfaceVariant, textAlign = TextAlign.End, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            if (vkd3dVersion.isNotEmpty()) {
-                Text("VKD3D $vkd3dVersion", fontSize = 10.sp, color = OnSurfaceVariant, textAlign = TextAlign.End, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val hasChips = resolution.isNotEmpty() || driverLabel.isNotEmpty() ||
+                dxvkVersion.isNotEmpty() || vkd3dVersion.isNotEmpty()
+            if (hasChips) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    if (resolution.isNotEmpty()) CompChip(resolution, ChipResColor)
+                    if (driverLabel.isNotEmpty()) CompChip(driverLabel, ChipDriverColor)
+                    if (dxvkVersion.isNotEmpty()) CompChip("DXVK $dxvkVersion", ChipDxvkColor)
+                    if (vkd3dVersion.isNotEmpty()) CompChip("VKD3D $vkd3dVersion", ChipVkd3dColor)
+                }
             }
         }
         Box {
@@ -703,6 +717,28 @@ private fun ShortcutItem(
             }
         }
     }
+}
+
+// Colour-coded component chips for the list-view card (layout A).
+private val ChipResColor = Color(0xFF7FB2FF)
+private val ChipDriverColor = Color(0xFFFFB02E)
+private val ChipDxvkColor = Color(0xFF5BD6A6)
+private val ChipVkd3dColor = Color(0xFFC08CFF)
+
+@Composable
+private fun CompChip(text: String, color: Color) {
+    Text(
+        text = text,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(color.copy(alpha = 0.14f))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
