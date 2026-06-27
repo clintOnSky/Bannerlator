@@ -33,10 +33,23 @@ versionCode 30→31, versionName 1.9.1→1.9.2 (`84b6bc1`), pushed main, dispatc
 (→ prerelease:false + make_latest:true). Workflow builds all 3 release APKs + generates/attaches
 update.json (vc31) so the in-app updater offers it to stable users.
 
-**What 1.9.2 ships (since 1.9.1):** full Vulkan effect suite — P1c CAS + fake-HDR + sharpness sliders,
-P2 FXAA/Toon/Color/CRT/NTSC screen effects; Native-Rendering ↔ presets mutex; Linear default scaling
-mode; on-screen-controls overlay-opacity drop-shadow fix (`1d9439e`). Plain numeric tag = stable per the
-versioning hard rule (patch X.Y.Z allowed on explicit user request).
+**What 1.9.2 ships (since 1.9.1):** full Vulkan effect suite — P1 SGSR + FSR1 upscalers (`5f5a4a0`),
+P1b sharpen + render-scale, P1c CAS + fake-HDR + sharpness sliders, P2 FXAA/Toon/Color/CRT/NTSC screen
+effects; Native-Rendering ↔ presets mutex; Linear default scaling mode; on-screen-controls overlay-opacity
+drop-shadow fix (`1d9439e`). Plain numeric tag = stable per the versioning hard rule (patch X.Y.Z allowed
+on explicit user request).
+
+**✅ PUBLISHED — release run `28295879200` succeeded.** 1.9.2 is **Latest**, prerelease=false, all 3 flavor
+APKs + `update.json` (vc31) attached → in-app updater offers the OTA to 1.9.1 (vc30) installs. Release body
+rewritten to the polished 1.9.1-style layout (logo → ✨What's New → 📥Downloads → 🙏Credits → changelog)
+with a full **graphics credits table**: SGSR ([SnapdragonStudios/snapdragon-gsr](https://github.com/SnapdragonStudios/snapdragon-gsr), BSD-3),
+FSR/Sharpen ([GPUOpen-Effects/FidelityFX-FSR](https://github.com/GPUOpen-Effects/FidelityFX-FSR), MIT),
+CAS ([GPUOpen-Effects/FidelityFX-CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS), MIT),
+FSR-Fit/compositor blueprint ([utkarshdalal/GameNative](https://github.com/utkarshdalal/GameNative), GPL-3.0 — approach reimplemented, not copied),
+and HDR/FXAA/Toon/CRT/NTSC/Color (upstream Winlator-Ludashi GLES2 effects ported to Vulkan). Attributions
+sourced from the bundled shader headers at `app/src/main/cpp/winlator/*.frag`, which retain their upstream
+license text. ⚠️First run `28295471682` FAILED at the update.json step — `release_notes` had literal
+double-quotes that broke the bash `NOTES="..."` assignment (exit 127); re-ran with shell-safe plain notes.
 
 ---
 
