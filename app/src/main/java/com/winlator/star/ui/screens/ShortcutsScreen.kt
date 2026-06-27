@@ -18,6 +18,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
@@ -164,6 +165,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     val shortcuts by vm.shortcuts.collectAsState(initial = emptyList())
     val sortOrder by vm.sortOrder.collectAsState()
     val isGridView by vm.isGridView.collectAsState()
+    val useLayoutL by vm.useLayoutL.collectAsState()
     val context = LocalContext.current
     val activity = context as Activity
 
@@ -204,7 +206,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // first and runs first (clears); we enqueue second and run after (sets). A
     // SideEffect would run synchronously during commit, getting steamrolled by the
     // parent's clear when it fires post-commit.
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isGridView, useLayoutL) {
         topBarActions.value = {
             IconButton(onClick = { vm.setGridView(!isGridView) }) {
                 Icon(
@@ -212,6 +214,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     contentDescription = if (isGridView) "List view" else "Grid view",
                     tint = androidx.compose.ui.graphics.Color.White,
                 )
+            }
+            // List-card style chooser (layout A ↔ L) — only meaningful in list view.
+            if (!isGridView) {
+                IconButton(onClick = { vm.setUseLayoutL(!useLayoutL) }) {
+                    Text(
+                        text = if (useLayoutL) "L" else "A",
+                        color = androidx.compose.ui.graphics.Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                    )
+                }
             }
             Box {
                 IconButton(onClick = { showSortMenu = true }) {
@@ -316,16 +329,36 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                             items(shortcuts, key = { it.file.path }) { shortcut ->
-                                ShortcutItem(
-                                    shortcut = shortcut,
-                                    onRun = { runShortcut(activity, shortcut) },
-                                    onSettings = { settingsShortcut = shortcut },
-                                    onRemove = { confirmRemove = shortcut },
-                                    onClone = { cloneTarget = shortcut },
-                                    onAddToHome = { addToHomeScreen(context, shortcut) },
-                                    onExport = { exportShortcut(context, shortcut) },
-                                    onProperties = { propertiesShortcut = shortcut },
-                                )
+                                val itemRun = { runShortcut(activity, shortcut) }
+                                val itemSettings = { settingsShortcut = shortcut }
+                                val itemRemove = { confirmRemove = shortcut }
+                                val itemClone = { cloneTarget = shortcut }
+                                val itemAddToHome = { addToHomeScreen(context, shortcut) }
+                                val itemExport = { exportShortcut(context, shortcut) }
+                                val itemProperties = { propertiesShortcut = shortcut }
+                                if (useLayoutL) {
+                                    ShortcutItemLayoutL(
+                                        shortcut = shortcut,
+                                        onRun = itemRun,
+                                        onSettings = itemSettings,
+                                        onRemove = itemRemove,
+                                        onClone = itemClone,
+                                        onAddToHome = itemAddToHome,
+                                        onExport = itemExport,
+                                        onProperties = itemProperties,
+                                    )
+                                } else {
+                                    ShortcutItem(
+                                        shortcut = shortcut,
+                                        onRun = itemRun,
+                                        onSettings = itemSettings,
+                                        onRemove = itemRemove,
+                                        onClone = itemClone,
+                                        onAddToHome = itemAddToHome,
+                                        onExport = itemExport,
+                                        onProperties = itemProperties,
+                                    )
+                                }
                                 Divider(color = DividerColor)
                             }
                         }
@@ -600,8 +633,6 @@ private fun ShortcutItem(
     onExport: () -> Unit,
     onProperties: () -> Unit,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
-
     // Resolved component metadata (shortcut override → container default).
     val resolution = shortcut.getExtra("screenSize", shortcut.container?.getScreenSize() ?: "")
     val driverCfg = shortcut.getExtra("graphicsDriverConfig", shortcut.container?.getGraphicsDriverConfig() ?: "")
@@ -679,51 +710,243 @@ private fun ShortcutItem(
                 }
             }
         }
-        Box {
-            IconButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = OnSurfaceVariant)
-            }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("Settings") },
-                    leadingIcon = { Icon(Icons.Filled.Settings, null) },
-                    onClick = { menuExpanded = false; onSettings() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Remove") },
-                    leadingIcon = { Icon(Icons.Filled.Delete, null) },
-                    onClick = { menuExpanded = false; onRemove() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Clone to container") },
-                    leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
-                    onClick = { menuExpanded = false; onClone() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add to home screen") },
-                    leadingIcon = { Icon(Icons.Filled.AddToHomeScreen, null) },
-                    onClick = { menuExpanded = false; onAddToHome() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Export") },
-                    leadingIcon = { Icon(Icons.Filled.Upload, null) },
-                    onClick = { menuExpanded = false; onExport() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Properties") },
-                    leadingIcon = { Icon(Icons.Filled.Info, null) },
-                    onClick = { menuExpanded = false; onProperties() },
-                )
-            }
-        }
+        ShortcutOverflowButton(
+            onSettings = onSettings,
+            onRemove = onRemove,
+            onClone = onClone,
+            onAddToHome = onAddToHome,
+            onExport = onExport,
+            onProperties = onProperties,
+        )
     }
 }
 
-// Colour-coded component chips for the list-view card (layout A).
+// Layout L (primary chips + muted secondary line, issue #19). Same poster cover as A,
+// but the components are split by how often you check them: renderer, DXVK and frame-gen
+// are bright chips; driver, VKD3D, x86 backend and audio sit on a calm muted line with a
+// colour dot each. Resolution rides in the container subtitle. "Calm but complete."
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ShortcutItemLayoutL(
+    shortcut: Shortcut,
+    onRun: () -> Unit,
+    onSettings: () -> Unit,
+    onRemove: () -> Unit,
+    onClone: () -> Unit,
+    onAddToHome: () -> Unit,
+    onExport: () -> Unit,
+    onProperties: () -> Unit,
+) {
+    val container = shortcut.container
+    val res = LocalContext.current.resources
+
+    // Resolved component metadata (shortcut override → container default).
+    val resolution = shortcut.getExtra("screenSize", container?.getScreenSize() ?: "")
+    val driverCfg = shortcut.getExtra("graphicsDriverConfig", container?.getGraphicsDriverConfig() ?: "")
+    val driverLabel = if (driverCfg.isNotEmpty()) GraphicsDriverConfigDialog.getVersion(driverCfg) else ""
+    val dxwrapperCfg = shortcut.getExtra("dxwrapperConfig", container?.getDXWrapperConfig() ?: "")
+    val cfgMap = dxwrapperCfg.split(",").mapNotNull {
+        val parts = it.split("=", limit = 2)
+        if (parts.size == 2) parts[0].trim() to parts[1].trim() else null
+    }.toMap()
+    val dxvkVersion = cfgMap["version"] ?: ""
+    val vkd3dVersion = cfgMap["vkd3dVersion"] ?: ""
+
+    val rendererLabel = when (shortcut.getExtra("renderer", container?.renderer ?: "").lowercase()) {
+        "vulkan" -> "Vulkan"
+        "surfaceflinger" -> "SurfaceFlinger"
+        "opengl" -> "OpenGL"
+        else -> ""
+    }
+    val frameGenLabel = when (shortcut.getExtra("frameGenEngine", container?.frameGenEngine ?: "off")) {
+        "bionic" -> "Bionic-FG"
+        "lsfg" -> "LSFG-VK"
+        else -> ""
+    }
+    val backendLabel = run {
+        val id = shortcut.getExtra("emulator", container?.emulator ?: "")
+        res.getStringArray(R.array.emulator_entries)
+            .firstOrNull { StringUtils.parseIdentifier(it) == id } ?: ""
+    }
+    val audioLabel = run {
+        val id = shortcut.getExtra("audioDriver", container?.audioDriver ?: "")
+        res.getStringArray(R.array.audio_driver_entries)
+            .firstOrNull { StringUtils.parseIdentifier(it) == id } ?: ""
+    }
+
+    val subtitle = listOf(container?.name ?: "", resolution).filter { it.isNotEmpty() }.joinToString(" · ")
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceColor)
+            .clickable(onClick = onRun)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        // 3:4 poster cover (same as layout A); fall back to a glyph tile.
+        Box(
+            modifier = Modifier
+                .size(width = 48.dp, height = 64.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(SurfaceVariantColor),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (shortcut.icon != null) {
+                Image(
+                    bitmap = shortcut.icon.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Filled.OpenInNew,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = shortcut.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = OnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // Primary: the things you most often check — bright chips.
+            val hasPrimary = rendererLabel.isNotEmpty() || dxvkVersion.isNotEmpty() || frameGenLabel.isNotEmpty()
+            if (hasPrimary) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    if (rendererLabel.isNotEmpty()) CompChip(rendererLabel, ChipRendColor)
+                    if (dxvkVersion.isNotEmpty()) CompChip("DXVK $dxvkVersion", ChipDxvkColor)
+                    if (frameGenLabel.isNotEmpty()) CompChip(frameGenLabel, ChipFgColor)
+                }
+            }
+            // Secondary: the rest — muted line with a colour dot each.
+            val secondary = buildList {
+                if (driverLabel.isNotEmpty()) add(driverLabel to ChipDriverColor)
+                if (vkd3dVersion.isNotEmpty()) add("VKD3D $vkd3dVersion" to ChipVkd3dColor)
+                if (backendLabel.isNotEmpty()) add(backendLabel to ChipCpuColor)
+                if (audioLabel.isNotEmpty()) add(audioLabel to ChipAudColor)
+            }
+            if (secondary.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 7.dp),
+                ) {
+                    secondary.forEach { (text, color) -> SecondarySpec(text, color) }
+                }
+            }
+        }
+        ShortcutOverflowButton(
+            onSettings = onSettings,
+            onRemove = onRemove,
+            onClone = onClone,
+            onAddToHome = onAddToHome,
+            onExport = onExport,
+            onProperties = onProperties,
+        )
+    }
+}
+
+// Colour-coded component chips for the list-view cards (layouts A and L).
 private val ChipResColor = Color(0xFF7FB2FF)
+private val ChipRendColor = Color(0xFF36D1DC)
 private val ChipDriverColor = Color(0xFFFFB02E)
 private val ChipDxvkColor = Color(0xFF5BD6A6)
 private val ChipVkd3dColor = Color(0xFFC08CFF)
+private val ChipFgColor = Color(0xFFFF6FAE)
+private val ChipCpuColor = Color(0xFFFF8A5C)
+private val ChipAudColor = Color(0xFF9BB1FF)
+
+// A muted secondary spec (layout L): small colour dot + dimmed label.
+@Composable
+private fun SecondarySpec(text: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(color.copy(alpha = 0.85f)),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = text,
+            fontSize = 10.sp,
+            color = OnSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// Shared overflow (⋮) button + menu for the list-view cards.
+@Composable
+private fun ShortcutOverflowButton(
+    onSettings: () -> Unit,
+    onRemove: () -> Unit,
+    onClone: () -> Unit,
+    onAddToHome: () -> Unit,
+    onExport: () -> Unit,
+    onProperties: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { menuExpanded = true }) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = OnSurfaceVariant)
+        }
+        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Settings") },
+                leadingIcon = { Icon(Icons.Filled.Settings, null) },
+                onClick = { menuExpanded = false; onSettings() },
+            )
+            DropdownMenuItem(
+                text = { Text("Remove") },
+                leadingIcon = { Icon(Icons.Filled.Delete, null) },
+                onClick = { menuExpanded = false; onRemove() },
+            )
+            DropdownMenuItem(
+                text = { Text("Clone to container") },
+                leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
+                onClick = { menuExpanded = false; onClone() },
+            )
+            DropdownMenuItem(
+                text = { Text("Add to home screen") },
+                leadingIcon = { Icon(Icons.Filled.AddToHomeScreen, null) },
+                onClick = { menuExpanded = false; onAddToHome() },
+            )
+            DropdownMenuItem(
+                text = { Text("Export") },
+                leadingIcon = { Icon(Icons.Filled.Upload, null) },
+                onClick = { menuExpanded = false; onExport() },
+            )
+            DropdownMenuItem(
+                text = { Text("Properties") },
+                leadingIcon = { Icon(Icons.Filled.Info, null) },
+                onClick = { menuExpanded = false; onProperties() },
+            )
+        }
+    }
+}
 
 @Composable
 private fun CompChip(text: String, color: Color) {
