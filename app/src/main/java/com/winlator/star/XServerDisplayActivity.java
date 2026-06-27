@@ -1777,6 +1777,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
+        // GL renderer: apply the container's filter mode to the window/content sampler. The Vulkan
+        // path above drives this through setUpscaler (modes 1/2); on GL the dedicated setFilterMode
+        // is the single source of truth. Gated to GLRenderer so it stays a no-op on Vulkan/ASR.
+        // (filterMode: 0=default -> Linear, 1=linear -> Linear, 2=nearest -> Nearest.)
+        if (renderer instanceof GLRenderer) {
+            renderer.setFilterMode(container.getRendererFilterMode());
+        }
+
         // ASR has no compositor copyArea path either, so drive the perf HUD per present (same as
         // the Vulkan tick above) — otherwise the HUD shows no FPS under the SurfaceFlinger renderer.
         if (renderer instanceof com.winlator.star.renderer.ASurfaceRenderer) {

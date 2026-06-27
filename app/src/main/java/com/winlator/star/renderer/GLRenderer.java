@@ -61,6 +61,13 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     private boolean magnifierEnabled = true;
     public int surfaceWidth;
     public int surfaceHeight;
+
+    // Selectable sampler filter for window/content drawables only (the cursor stays LINEAR so the
+    // pointer never goes blocky). Mirrors the Vulkan filter-int convention used by setUpscaler:
+    //   0/default & 1 -> GL_LINEAR (bilinear), 2 -> GL_NEAREST (point). Applied per-frame in
+    //   renderDrawable, which keeps the GPUImage zero-copy texture untouched (sampler state only,
+    //   no CPU upload) and supports live mid-game switching.
+    private volatile int windowTexFilter = GLES20.GL_LINEAR;
     
     private final EffectComposer effectComposer;
 
@@ -323,6 +330,13 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
 
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture.getTextureId());
+            // Apply the user-selected filter only to window/content drawables. The cursor goes
+            // through cursorMaterial and is left at its texture's default LINEAR so the pointer
+            // stays smooth. This is sampler state only — it does NOT touch the GPUImage upload path.
+            if (material == windowMaterial) {
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, windowTexFilter);
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, windowTexFilter);
+            }
             GLES20.glUniform1i(material.getUniformLocation("texture"), 0);
             GLES20.glUniform1fv(material.getUniformLocation("xform"), tmpXForm1.length, tmpXForm1, 0);
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, quadVertices.count());
@@ -453,7 +467,12 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     @Override public void setRenderingEnabled(boolean enabled) {}
     @Override public void requestRender() { xServerView.requestRender(); }
     @Override public void forceCleanup() {}
-    @Override public void setFilterMode(int mode) {}
+    @Override public void setFilterMode(int mode) {
+        // Convention shared with the Vulkan side (setUpscaler modes 1/2): 2 == Nearest (point),
+        // everything else (0=default, 1=linear) == Linear (bilinear). Window/content drawables only.
+        windowTexFilter = (mode == 2) ? GLES20.GL_NEAREST : GLES20.GL_LINEAR;
+        xServerView.requestRender();
+    }
     @Override public void setFpsWindowId(int id) {}
     @Override public void setFrameRating(Object fr) {}
     @Override public int getFpsLimit() { return 0; }
