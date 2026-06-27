@@ -237,6 +237,14 @@ Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetFilterMode(JNIEnv
     if (r) r->setFilterMode((int)mode);
 }
 
+// Scaling mode enum (see VulkanRendererContext::upscalerMode):
+//   0=none 1=linear 2=nearest 3=sgsr 4=fsr(fill) 5=fsr_fit(letterbox)
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetUpscaler(JNIEnv*, jobject, jlong handle, jint mode) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setUpscaler((int)mode);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetSwapRB(JNIEnv*, jobject, jlong handle, jboolean enabled) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);

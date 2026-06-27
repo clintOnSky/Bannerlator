@@ -113,6 +113,24 @@ static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
 struct WindowPushConstants { float ndcX0, ndcY0, ndcX1, ndcY1; int useTexAlpha; };
 
+// Push-constant layouts for the spatial-upscaler post passes. The leading vec4
+// `ndc` matches upscale.vert; the remaining members are read only by the
+// fragment stage. std430 offsets line up with these C structs.
+struct SgsrPushConstants {                 // 32 bytes
+    float ndc[4];
+    float viewportInfo[4];                 // xy = 1/inputSize, zw = inputSize px
+};
+struct EasuPushConstants {                 // 88 bytes
+    float    ndc[4];
+    uint32_t con0[4], con1[4], con2[4], con3[4];
+    float    outW, outH;
+};
+struct RcasPushConstants {                 // 40 bytes
+    float    ndc[4];
+    uint32_t con[4];                       // con.x = bit-packed sharpness
+    float    outW, outH;
+};
+
 class VulkanRendererContext {
 public:
     VulkanRendererContext(ANativeWindow* window, int cWidth, int cHeight, void* adrenotoolsHandle = nullptr);
@@ -161,6 +179,7 @@ public:
     void loadDeviceDispatch();
 
     void setFilterMode(int mode);
+    void setUpscaler(int mode);
     void setSwapRB(bool enabled);
     void setPresentMode(VkPresentModeKHR mode);
     std::vector<int> getSupportedPresentModes() const;
@@ -295,6 +314,53 @@ private:
 
     VkPipeline            pipeline    = VK_NULL_HANDLE;
 
+    // ---- Spatial upscaler (SGSR / FSR1) ----
+    // upscalerMode enum (mirrored by JNI nativeSetUpscaler):
+    //   0 = none     (passthrough; current sampler governs scaling)
+    //   1 = linear   (rebuild base sampler LINEAR; no shader pass)
+    //   2 = nearest  (rebuild base sampler NEAREST; no shader pass)
+    //   3 = sgsr     (Snapdragon GSR 1.0; single pass; aspect-fit / letterbox)
+    //   4 = fsr      (AMD FSR1 EASU+RCAS; two passes; fill / stretch)
+    //   5 = fsr_fit  (AMD FSR1 EASU+RCAS; two passes; aspect-fit / letterbox)
+    // Shader upscaling only engages for modes 3-5 AND when the game render
+    // resolution (container) is smaller than the swapchain. Otherwise the
+    // existing direct-to-swapchain path is used unchanged.
+    int               upscalerMode      = 0;
+
+    VkSampler         upscaleSampler    = VK_NULL_HANDLE; // linear clamp; offscreen/mid input
+    VkFormat          offscreenFmt      = VK_FORMAT_R8G8B8A8_UNORM;
+    VkRenderPass      offscreenRenderPass = VK_NULL_HANDLE; // CLEAR -> SHADER_READ_ONLY
+    VkPipelineLayout  postPipeLayout    = VK_NULL_HANDLE;
+    VkPipeline        sgsrPipeline      = VK_NULL_HANDLE;
+    VkPipeline        easuPipeline      = VK_NULL_HANDLE;
+    VkPipeline        rcasPipeline      = VK_NULL_HANDLE;
+
+    // offscreen composite target @ game/container resolution
+    VkImage           offscreenImg  = VK_NULL_HANDLE;
+    VkDeviceMemory    offscreenMem  = VK_NULL_HANDLE;
+    VkImageView       offscreenView = VK_NULL_HANDLE;
+    VkFramebuffer     offscreenFB   = VK_NULL_HANDLE;
+    VkDescriptorSet   offscreenDS   = VK_NULL_HANDLE;
+    int               offscreenW = 0, offscreenH = 0;
+
+    // FSR intermediate (EASU output) @ upscale output resolution
+    VkImage           midImg  = VK_NULL_HANDLE;
+    VkDeviceMemory    midMem  = VK_NULL_HANDLE;
+    VkImageView       midView = VK_NULL_HANDLE;
+    VkFramebuffer     midFB   = VK_NULL_HANDLE;
+    VkDescriptorSet   midDS   = VK_NULL_HANDLE;
+    int               midW = 0, midH = 0;
+
+    // Per-frame upscale plan, computed in renderFrame, consumed by recordCmdBuf.
+    struct UpscaleFrame {
+        bool active = false;
+        int  mode = 0;
+        int  outX = 0, outY = 0, outW = 0, outH = 0;
+        SgsrPushConstants sgsrPC{};
+        EasuPushConstants easuPC{};
+        RcasPushConstants rcasPC{};
+    } upFrame;
+
     VkCommandPool                cmdPool = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> cmdBufs;
 
@@ -327,6 +393,21 @@ private:
     void createFramebuffers();
     void createCmdPool();
     void createSampler();
+    void createUpscaleSampler();
+    void createOffscreenRenderPass();
+    void createPostPipelines();
+    VkPipeline createPostPipeline(const uint32_t* fragCode, size_t fragSz, VkRenderPass rp);
+    bool createColorTarget(int w, int h, VkImage& img, VkDeviceMemory& mem,
+                           VkImageView& view, VkFramebuffer& fb, VkDescriptorSet& ds);
+    void destroyColorTarget(VkImage& img, VkDeviceMemory& mem, VkImageView& view,
+                            VkFramebuffer& fb, VkDescriptorSet& ds);
+    bool ensureOffscreen(int w, int h);
+    bool ensureMid(int w, int h);
+    void recordUpscalePasses(VkCommandBuffer cb, uint32_t imgIdx,
+                             const std::vector<DrawEntry>& draws, bool cursorDrawn,
+                             short ptrX, short ptrY, short curHotX, short curHotY,
+                             short curW, short curH);
+    void planUpscaleFrame();
     void createWinTexPool();
     void createCursorPipeline();
     void createCursorDS();

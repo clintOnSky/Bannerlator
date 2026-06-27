@@ -6,9 +6,47 @@
 #include <cstring>
 #include <algorithm>
 #include <inttypes.h>
+#include <cmath>
 #include <dlfcn.h>
 #include "window_vert.h"
 #include "window_frag.h"
+#include "upscale_vert.h"
+#include "sgsr_frag.h"
+#include "fsr_easu_frag.h"
+#include "fsr_rcas_frag.h"
+
+// ---- CPU-side FSR1 constant setup (mirrors ffx_fsr1.h FsrEasuCon/FsrRcasCon) ----
+static inline uint32_t fsrPackF(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
+
+static void fsrEasuCon(uint32_t con0[4], uint32_t con1[4], uint32_t con2[4], uint32_t con3[4],
+                       float inViewportX, float inViewportY,
+                       float inSizeX, float inSizeY,
+                       float outX, float outY) {
+    con0[0] = fsrPackF(inViewportX / outX);
+    con0[1] = fsrPackF(inViewportY / outY);
+    con0[2] = fsrPackF(0.5f * inViewportX / outX - 0.5f);
+    con0[3] = fsrPackF(0.5f * inViewportY / outY - 0.5f);
+    con1[0] = fsrPackF(1.0f / inSizeX);
+    con1[1] = fsrPackF(1.0f / inSizeY);
+    con1[2] = fsrPackF(1.0f / inSizeX);
+    con1[3] = fsrPackF(-1.0f / inSizeY);
+    con2[0] = fsrPackF(-1.0f / inSizeX);
+    con2[1] = fsrPackF(2.0f / inSizeY);
+    con2[2] = fsrPackF(1.0f / inSizeX);
+    con2[3] = fsrPackF(2.0f / inSizeY);
+    con3[0] = fsrPackF(0.0f);
+    con3[1] = fsrPackF(4.0f / inSizeY);
+    con3[2] = 0;
+    con3[3] = 0;
+}
+
+static void fsrRcasCon(uint32_t con[4], float sharpnessStops) {
+    float s = exp2f(-sharpnessStops);     // 0 stops = sharpest
+    con[0] = fsrPackF(s);
+    con[1] = 0;                            // fp16 packed sharpness (unused by fp32 path)
+    con[2] = 0;
+    con[3] = 0;
+}
 
 VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH, void* aHandle)
     : window(win), surfaceWidth(cW), surfaceHeight(cH), containerWidth(cW), containerHeight(cH),
@@ -18,6 +56,7 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
     createSwapchain(); createRenderPass(); createDSLayout();
     createPipeline(true, pipeline);
     createFramebuffers(); createCmdPool(); createSampler();
+    createUpscaleSampler(); createOffscreenRenderPass(); createPostPipelines();
     createWinTexPool(); createCursorDS(); createCmdBufs(); createSyncObjects();
     isRunning = true;
     renderThread = std::thread(&VulkanRendererContext::renderLoop, this);
@@ -40,7 +79,17 @@ VulkanRendererContext::~VulkanRendererContext() {
     }
     deleteQueue.clear();
     cleanupSwapchain(); cleanupCursorTex();
-    
+
+    // upscaler resources (DS freed back to winTexPool while it is still alive)
+    destroyColorTarget(offscreenImg, offscreenMem, offscreenView, offscreenFB, offscreenDS);
+    destroyColorTarget(midImg, midMem, midView, midFB, midDS);
+    if (sgsrPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrPipeline, nullptr);
+    if (easuPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, easuPipeline, nullptr);
+    if (rcasPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, rcasPipeline, nullptr);
+    if (postPipeLayout    != VK_NULL_HANDLE) vk_.DestroyPipelineLayout(device, postPipeLayout, nullptr);
+    if (offscreenRenderPass != VK_NULL_HANDLE) vk_.DestroyRenderPass(device, offscreenRenderPass, nullptr);
+    if (upscaleSampler    != VK_NULL_HANDLE) vk_.DestroySampler(device, upscaleSampler, nullptr);
+
     vk_.DestroySampler(device, sampler, nullptr);
     vk_.DestroyDescriptorPool(device, winTexPool, nullptr);
     vk_.DestroyPipeline(device, pipeline, nullptr);
@@ -401,12 +450,160 @@ void VulkanRendererContext::createSampler() {
     if (vk_.CreateSampler(device,&ci,nullptr,&sampler)!=VK_SUCCESS) throw std::runtime_error("sampler");
 }
 
+// ============================ Spatial upscaler ==============================
+
+void VulkanRendererContext::createUpscaleSampler() {
+    // FSR/SGSR sample the offscreen/mid targets with bilinear + clamp-to-edge.
+    VkSamplerCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    ci.magFilter=VK_FILTER_LINEAR; ci.minFilter=VK_FILTER_LINEAR;
+    ci.addressModeU=ci.addressModeV=ci.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    ci.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    ci.minLod=0.f; ci.maxLod=0.f;
+    if (vk_.CreateSampler(device,&ci,nullptr,&upscaleSampler)!=VK_SUCCESS)
+        throw std::runtime_error("upscale sampler");
+}
+
+void VulkanRendererContext::createOffscreenRenderPass() {
+    // Render target that is later SAMPLED (composite offscreen + EASU output).
+    VkAttachmentDescription att{}; att.format=offscreenFmt; att.samples=VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR; att.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE; att.stencilStoreOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED; att.finalLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkAttachmentReference ref{0,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sub{}; sub.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount=1; sub.pColorAttachments=&ref;
+    VkSubpassDependency deps[2]{};
+    // make a previous frame's sampling of this image finish before we overwrite it
+    deps[0].srcSubpass=VK_SUBPASS_EXTERNAL; deps[0].dstSubpass=0;
+    deps[0].srcStageMask=VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[0].dstStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[0].srcAccessMask=VK_ACCESS_SHADER_READ_BIT;
+    deps[0].dstAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    // make this pass's writes visible to the subsequent upscale-pass sampling
+    deps[1].srcSubpass=0; deps[1].dstSubpass=VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].dstStageMask=VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[1].srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
+    VkRenderPassCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    ci.attachmentCount=1; ci.pAttachments=&att; ci.subpassCount=1; ci.pSubpasses=&sub;
+    ci.dependencyCount=2; ci.pDependencies=deps;
+    if (vk_.CreateRenderPass(device,&ci,nullptr,&offscreenRenderPass)!=VK_SUCCESS)
+        throw std::runtime_error("offscreen renderpass");
+}
+
+VkPipeline VulkanRendererContext::createPostPipeline(const uint32_t* fragCode, size_t fragSz, VkRenderPass rp) {
+    auto vert=makeShader(upscale_vert_code,sizeof(upscale_vert_code));
+    auto frag=makeShader(fragCode,fragSz);
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    stages[0].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[0].stage=VK_SHADER_STAGE_VERTEX_BIT;   stages[0].module=vert; stages[0].pName="main";
+    stages[1].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; stages[1].stage=VK_SHADER_STAGE_FRAGMENT_BIT; stages[1].module=frag; stages[1].pName="main";
+    VkPipelineVertexInputStateCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VkPipelineInputAssemblyStateCreateInfo ia{}; ia.sType=VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO; ia.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo ds{}; ds.sType=VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO; ds.dynamicStateCount=2; ds.pDynamicStates=dyn;
+    VkPipelineViewportStateCreateInfo vp{}; vp.sType=VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO; vp.viewportCount=1; vp.scissorCount=1;
+    VkPipelineRasterizationStateCreateInfo rast{}; rast.sType=VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO; rast.polygonMode=VK_POLYGON_MODE_FILL; rast.lineWidth=1.f; rast.cullMode=VK_CULL_MODE_NONE; rast.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    VkPipelineMultisampleStateCreateInfo ms{}; ms.sType=VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO; ms.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineColorBlendAttachmentState ba{}; ba.colorWriteMask=0xF; ba.blendEnable=VK_FALSE; // opaque post pass
+    VkPipelineColorBlendStateCreateInfo cb{}; cb.sType=VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO; cb.attachmentCount=1; cb.pAttachments=&ba;
+    VkGraphicsPipelineCreateInfo pi{}; pi.sType=VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pi.stageCount=2; pi.pStages=stages; pi.pVertexInputState=&vi; pi.pInputAssemblyState=&ia;
+    pi.pViewportState=&vp; pi.pRasterizationState=&rast; pi.pMultisampleState=&ms;
+    pi.pColorBlendState=&cb; pi.pDynamicState=&ds; pi.layout=postPipeLayout; pi.renderPass=rp; pi.subpass=0;
+    VkPipeline out=VK_NULL_HANDLE;
+    VkResult r=vk_.CreateGraphicsPipelines(device,VK_NULL_HANDLE,1,&pi,nullptr,&out);
+    vk_.DestroyShaderModule(device,frag,nullptr); vk_.DestroyShaderModule(device,vert,nullptr);
+    if (r!=VK_SUCCESS) throw std::runtime_error("post pipeline");
+    return out;
+}
+
+void VulkanRendererContext::createPostPipelines() {
+    VkPushConstantRange pc{}; pc.stageFlags=VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT;
+    pc.offset=0; pc.size=sizeof(EasuPushConstants); // largest of the three PC structs
+    VkPipelineLayoutCreateInfo li{}; li.sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    li.setLayoutCount=1; li.pSetLayouts=&dsLayout; li.pushConstantRangeCount=1; li.pPushConstantRanges=&pc;
+    if (vk_.CreatePipelineLayout(device,&li,nullptr,&postPipeLayout)!=VK_SUCCESS)
+        throw std::runtime_error("post pipelayout");
+    // EASU writes the (sampled) mid target -> offscreenRenderPass.
+    // SGSR & RCAS write the swapchain -> renderPass.
+    easuPipeline = createPostPipeline(fsr_easu_code, sizeof(fsr_easu_code), offscreenRenderPass);
+    sgsrPipeline = createPostPipeline(sgsr_code,     sizeof(sgsr_code),     renderPass);
+    rcasPipeline = createPostPipeline(fsr_rcas_code, sizeof(fsr_rcas_code), renderPass);
+}
+
+bool VulkanRendererContext::createColorTarget(int w, int h, VkImage& img, VkDeviceMemory& mem,
+        VkImageView& view, VkFramebuffer& fb, VkDescriptorSet& ds) {
+    VkImageCreateInfo ii{}; ii.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; ii.imageType=VK_IMAGE_TYPE_2D;
+    ii.extent={(uint32_t)w,(uint32_t)h,1}; ii.mipLevels=1; ii.arrayLayers=1; ii.format=offscreenFmt;
+    ii.tiling=VK_IMAGE_TILING_OPTIMAL; ii.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+    ii.usage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.samples=VK_SAMPLE_COUNT_1_BIT; ii.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+    if (vk_.CreateImage(device,&ii,nullptr,&img)!=VK_SUCCESS) return false;
+    VkMemoryRequirements req; vk_.GetImageMemoryRequirements(device,img,&req);
+    VkMemoryAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; ai.allocationSize=req.size;
+    ai.memoryTypeIndex=findMemType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vk_.AllocateMemory(device,&ai,nullptr,&mem)!=VK_SUCCESS){vk_.DestroyImage(device,img,nullptr);img=VK_NULL_HANDLE;return false;}
+    vk_.BindImageMemory(device,img,mem,0);
+    VkImageViewCreateInfo vci{}; vci.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; vci.image=img; vci.viewType=VK_IMAGE_VIEW_TYPE_2D; vci.format=offscreenFmt;
+    vci.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+    vci.components={VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY,VK_COMPONENT_SWIZZLE_IDENTITY};
+    if (vk_.CreateImageView(device,&vci,nullptr,&view)!=VK_SUCCESS){destroyColorTarget(img,mem,view,fb,ds);return false;}
+    VkImageView att[]={view};
+    VkFramebufferCreateInfo fi{}; fi.sType=VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fi.renderPass=offscreenRenderPass; fi.attachmentCount=1; fi.pAttachments=att; fi.width=(uint32_t)w; fi.height=(uint32_t)h; fi.layers=1;
+    if (vk_.CreateFramebuffer(device,&fi,nullptr,&fb)!=VK_SUCCESS){destroyColorTarget(img,mem,view,fb,ds);return false;}
+    VkDescriptorSetAllocateInfo dsai{}; dsai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    dsai.descriptorPool=winTexPool; dsai.descriptorSetCount=1; dsai.pSetLayouts=&dsLayout;
+    if (vk_.AllocateDescriptorSets(device,&dsai,&ds)!=VK_SUCCESS){ds=VK_NULL_HANDLE;destroyColorTarget(img,mem,view,fb,ds);return false;}
+    VkDescriptorImageInfo dii{}; dii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; dii.imageView=view; dii.sampler=upscaleSampler;
+    VkWriteDescriptorSet wr{}; wr.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; wr.dstSet=ds; wr.dstBinding=0; wr.descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; wr.descriptorCount=1; wr.pImageInfo=&dii;
+    vk_.UpdateDescriptorSets(device,1,&wr,0,nullptr);
+    return true;
+}
+
+void VulkanRendererContext::destroyColorTarget(VkImage& img, VkDeviceMemory& mem, VkImageView& view,
+        VkFramebuffer& fb, VkDescriptorSet& ds) {
+    if (ds  !=VK_NULL_HANDLE){ vk_.FreeDescriptorSets(device,winTexPool,1,&ds); ds=VK_NULL_HANDLE; }
+    if (fb  !=VK_NULL_HANDLE){ vk_.DestroyFramebuffer(device,fb,nullptr); fb=VK_NULL_HANDLE; }
+    if (view!=VK_NULL_HANDLE){ vk_.DestroyImageView(device,view,nullptr); view=VK_NULL_HANDLE; }
+    if (img !=VK_NULL_HANDLE){ vk_.DestroyImage(device,img,nullptr); img=VK_NULL_HANDLE; }
+    if (mem !=VK_NULL_HANDLE){ vk_.FreeMemory(device,mem,nullptr); mem=VK_NULL_HANDLE; }
+}
+
+bool VulkanRendererContext::ensureOffscreen(int w, int h) {
+    if (offscreenImg!=VK_NULL_HANDLE && offscreenW==w && offscreenH==h) return true;
+    if (w<=0||h<=0) return false;
+    if (offscreenImg!=VK_NULL_HANDLE) { vk_.DeviceWaitIdle(device); destroyColorTarget(offscreenImg,offscreenMem,offscreenView,offscreenFB,offscreenDS); }
+    offscreenW=offscreenH=0;
+    if (!createColorTarget(w,h,offscreenImg,offscreenMem,offscreenView,offscreenFB,offscreenDS)) {
+        RLOG_E("ensureOffscreen: createColorTarget %dx%d failed", w, h);
+        return false;
+    }
+    offscreenW=w; offscreenH=h;
+    return true;
+}
+
+bool VulkanRendererContext::ensureMid(int w, int h) {
+    if (midImg!=VK_NULL_HANDLE && midW==w && midH==h) return true;
+    if (w<=0||h<=0) return false;
+    if (midImg!=VK_NULL_HANDLE) { vk_.DeviceWaitIdle(device); destroyColorTarget(midImg,midMem,midView,midFB,midDS); }
+    midW=midH=0;
+    if (!createColorTarget(w,h,midImg,midMem,midView,midFB,midDS)) {
+        RLOG_E("ensureMid: createColorTarget %dx%d failed", w, h);
+        return false;
+    }
+    midW=w; midH=h;
+    return true;
+}
+
 void VulkanRendererContext::createWinTexPool() {
 
-    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 129};
+    // 128 window textures + cursor + offscreen + mid (upscaler) targets.
+    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 160};
     VkDescriptorPoolCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     ci.flags=VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    ci.poolSizeCount=1; ci.pPoolSizes=&ps; ci.maxSets=129;
+    ci.poolSizeCount=1; ci.pPoolSizes=&ps; ci.maxSets=160;
     if (vk_.CreateDescriptorPool(device,&ci,nullptr,&winTexPool)!=VK_SUCCESS) throw std::runtime_error("wintexpool");
 }
 
@@ -745,6 +942,12 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         vk_.CmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0, 0, nullptr, 0, nullptr, (uint32_t)postUpload.size(), postUpload.data());
 
+    if (upFrame.active) {
+        // Spatial-upscaler path: composite to an offscreen target at game res,
+        // then SGSR/FSR-upscale it into the swapchain (see recordUpscalePasses).
+        recordUpscalePasses(cb, imgIdx, draws, cursorDrawn,
+            ptrX, ptrY, curHotX, curHotY, curW, curH);
+    } else {
 
     VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass=renderPass; rpi.framebuffer=swapchainFBs[imgIdx]; rpi.renderArea={{0,0},swapchainExt};
@@ -781,12 +984,160 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         vk_.CmdDraw(cb, 4, 1, 0, 0);
     }
     vk_.CmdEndRenderPass(cb);
+    } // end !upFrame.active
 
     VkResult endStatus = vk_.EndCommandBuffer(cb);
     if (endStatus!=VK_SUCCESS) {
         RLOG_E("recordCmdBuf: EndCommandBuffer failed with status=%d (swapRB=%d draws=%zu imgIdx=%u)",
             (int)endStatus, (int)swapRB, draws.size(), imgIdx);
         throw std::runtime_error("end cb");
+    }
+}
+
+void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t imgIdx,
+    const std::vector<DrawEntry>& draws, bool cursorDrawn,
+    short ptrX, short ptrY, short curHotX, short curHotY, short curW, short curH)
+{
+    // ---- Stage 1: composite all game windows (+ cursor) 1:1 into the offscreen
+    //              target at game/container resolution, with an identity scene
+    //              transform. This is the upscaler input.
+    const float cw=(float)offscreenW, ch=(float)offscreenH;
+    {
+        VkClearValue clr={{{0.f,0.f,0.f,1.f}}};
+        VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpi.renderPass=offscreenRenderPass; rpi.framebuffer=offscreenFB;
+        rpi.renderArea={{0,0},{(uint32_t)offscreenW,(uint32_t)offscreenH}};
+        rpi.clearValueCount=1; rpi.pClearValues=&clr;
+        vk_.CmdBeginRenderPass(cb,&rpi,VK_SUBPASS_CONTENTS_INLINE);
+        VkViewport vp{0,0,cw,ch,0,1}; vk_.CmdSetViewport(cb,0,1,&vp);
+        VkRect2D scr{{0,0},{(uint32_t)offscreenW,(uint32_t)offscreenH}}; vk_.CmdSetScissor(cb,0,1,&scr);
+        vk_.CmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline);
+        for (auto& d : draws) {
+            if (d.ds==VK_NULL_HANDLE) continue;
+            vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeLayout,0,1,&d.ds,0,nullptr);
+            WindowPushConstants pc{};
+            pc.ndcX0=(float)d.x/cw*2.f-1.f;
+            pc.ndcY0=(float)d.y/ch*2.f-1.f;
+            pc.ndcX1=(float)(d.x+d.w)/cw*2.f-1.f;
+            pc.ndcY1=(float)(d.y+d.h)/ch*2.f-1.f;
+            pc.useTexAlpha=0;
+            vk_.CmdPushConstants(cb,pipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(pc),&pc);
+            vk_.CmdDraw(cb,4,1,0,0);
+        }
+        if (cursorDrawn) {
+            vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeLayout,0,1,&cursorDS,0,nullptr);
+            float cx=(float)std::max(0,(int)ptrX-curHotX), cy=(float)std::max(0,(int)ptrY-curHotY);
+            WindowPushConstants cpc{};
+            cpc.ndcX0=cx/cw*2.f-1.f; cpc.ndcY0=cy/ch*2.f-1.f;
+            cpc.ndcX1=(cx+curW)/cw*2.f-1.f; cpc.ndcY1=(cy+curH)/ch*2.f-1.f;
+            cpc.useTexAlpha=1;
+            vk_.CmdPushConstants(cb,pipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(cpc),&cpc);
+            vk_.CmdDraw(cb,4,1,0,0);
+        }
+        vk_.CmdEndRenderPass(cb);
+    }
+
+    VkClearValue blk={{{0.f,0.f,0.f,1.f}}};
+    VkViewport fullVp{0,0,(float)swapchainExt.width,(float)swapchainExt.height,0,1};
+    VkRect2D   fullSc{{0,0},swapchainExt};
+
+    if (upFrame.mode==3) {
+        // ---- SGSR: single pass, offscreen -> swapchain (letterbox via NDC rect,
+        //            black bars from the swapchain pass's CLEAR).
+        VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpi.renderPass=renderPass; rpi.framebuffer=swapchainFBs[imgIdx]; rpi.renderArea={{0,0},swapchainExt};
+        rpi.clearValueCount=1; rpi.pClearValues=&blk;
+        vk_.CmdBeginRenderPass(cb,&rpi,VK_SUBPASS_CONTENTS_INLINE);
+        vk_.CmdSetViewport(cb,0,1,&fullVp); vk_.CmdSetScissor(cb,0,1,&fullSc);
+        vk_.CmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,sgsrPipeline);
+        vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,postPipeLayout,0,1,&offscreenDS,0,nullptr);
+        vk_.CmdPushConstants(cb,postPipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(upFrame.sgsrPC),&upFrame.sgsrPC);
+        vk_.CmdDraw(cb,4,1,0,0);
+        vk_.CmdEndRenderPass(cb);
+    } else {
+        // ---- FSR: EASU offscreen -> mid (at output res), then RCAS mid -> swapchain.
+        {
+            VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rpi.renderPass=offscreenRenderPass; rpi.framebuffer=midFB;
+            rpi.renderArea={{0,0},{(uint32_t)midW,(uint32_t)midH}};
+            rpi.clearValueCount=1; rpi.pClearValues=&blk;
+            vk_.CmdBeginRenderPass(cb,&rpi,VK_SUBPASS_CONTENTS_INLINE);
+            VkViewport mvp{0,0,(float)midW,(float)midH,0,1}; vk_.CmdSetViewport(cb,0,1,&mvp);
+            VkRect2D msc{{0,0},{(uint32_t)midW,(uint32_t)midH}}; vk_.CmdSetScissor(cb,0,1,&msc);
+            vk_.CmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,easuPipeline);
+            vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,postPipeLayout,0,1,&offscreenDS,0,nullptr);
+            vk_.CmdPushConstants(cb,postPipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(upFrame.easuPC),&upFrame.easuPC);
+            vk_.CmdDraw(cb,4,1,0,0);
+            vk_.CmdEndRenderPass(cb);
+        }
+        {
+            VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rpi.renderPass=renderPass; rpi.framebuffer=swapchainFBs[imgIdx]; rpi.renderArea={{0,0},swapchainExt};
+            rpi.clearValueCount=1; rpi.pClearValues=&blk;
+            vk_.CmdBeginRenderPass(cb,&rpi,VK_SUBPASS_CONTENTS_INLINE);
+            vk_.CmdSetViewport(cb,0,1,&fullVp); vk_.CmdSetScissor(cb,0,1,&fullSc);
+            vk_.CmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,rcasPipeline);
+            vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,postPipeLayout,0,1,&midDS,0,nullptr);
+            vk_.CmdPushConstants(cb,postPipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(upFrame.rcasPC),&upFrame.rcasPC);
+            vk_.CmdDraw(cb,4,1,0,0);
+            vk_.CmdEndRenderPass(cb);
+        }
+    }
+}
+
+// Decide whether and how the spatial upscaler runs this frame, and pre-compute
+// the FSR constants / destination rect. Must be called on the render thread,
+// before recordCmdBuf. Resources are (re)created here as needed.
+void VulkanRendererContext::planUpscaleFrame() {
+    upFrame.active=false;
+    int mode=upscalerMode;
+    if (mode<3) return;
+    if (containerWidth<=0 || containerHeight<=0) return;
+    if (swapchain==VK_NULL_HANDLE) return;
+    // Only upscale when the game renders below the display resolution.
+    if ((int)swapchainExt.width<=containerWidth && (int)swapchainExt.height<=containerHeight) return;
+
+    int outX,outY,outW,outH;
+    if (mode==4) {                       // fsr (fill / stretch)
+        outX=0; outY=0; outW=(int)swapchainExt.width; outH=(int)swapchainExt.height;
+    } else {                             // sgsr (3) / fsr_fit (5): aspect-fit letterbox
+        float a=std::min((float)swapchainExt.width/(float)containerWidth,
+                         (float)swapchainExt.height/(float)containerHeight);
+        outW=(int)((float)containerWidth*a+0.5f);
+        outH=(int)((float)containerHeight*a+0.5f);
+        outX=((int)swapchainExt.width-outW)/2;
+        outY=((int)swapchainExt.height-outH)/2;
+    }
+    if (outW<=0||outH<=0) return;
+    if (!ensureOffscreen(containerWidth,containerHeight)) return;
+    if ((mode==4||mode==5) && !ensureMid(outW,outH)) return;
+
+    float scW=(float)swapchainExt.width, scH=(float)swapchainExt.height;
+    float nx0=(float)outX/scW*2.f-1.f, ny0=(float)outY/scH*2.f-1.f;
+    float nx1=(float)(outX+outW)/scW*2.f-1.f, ny1=(float)(outY+outH)/scH*2.f-1.f;
+
+    upFrame.active=true; upFrame.mode=mode;
+    upFrame.outX=outX; upFrame.outY=outY; upFrame.outW=outW; upFrame.outH=outH;
+
+    if (mode==3) {
+        SgsrPushConstants& p=upFrame.sgsrPC;
+        p.ndc[0]=nx0; p.ndc[1]=ny0; p.ndc[2]=nx1; p.ndc[3]=ny1;
+        p.viewportInfo[0]=1.f/(float)containerWidth;
+        p.viewportInfo[1]=1.f/(float)containerHeight;
+        p.viewportInfo[2]=(float)containerWidth;
+        p.viewportInfo[3]=(float)containerHeight;
+    } else {
+        EasuPushConstants& e=upFrame.easuPC;
+        e.ndc[0]=-1.f; e.ndc[1]=-1.f; e.ndc[2]=1.f; e.ndc[3]=1.f; // full mid target
+        fsrEasuCon(e.con0,e.con1,e.con2,e.con3,
+                   (float)containerWidth,(float)containerHeight,
+                   (float)containerWidth,(float)containerHeight,
+                   (float)outW,(float)outH);
+        e.outW=(float)outW; e.outH=(float)outH;
+        RcasPushConstants& r=upFrame.rcasPC;
+        r.ndc[0]=nx0; r.ndc[1]=ny0; r.ndc[2]=nx1; r.ndc[3]=ny1;
+        fsrRcasCon(r.con, 0.25f);
+        r.outW=(float)outW; r.outH=(float)outH;
     }
 }
 
@@ -937,6 +1288,7 @@ ok=true;}catch(...){}
         memcpy(cursorStgP, cursorPixels.data(), cursorUploadSize);
 
     bool effectiveCurVis = curVis && !scanoutActive.load();
+    planUpscaleFrame();   // decide/prepare spatial-upscaler passes for this frame
     recordCmdBuf(cmdBufs[currentFrame],imgIdx,frameDraws,
         frameAhbTransitions,framePreUpload,framePostUpload,
         curUpload,hasCurUpload,
@@ -1214,6 +1566,19 @@ void VulkanRendererContext::setFilterMode(int mode) {
 
     for (auto& [ahb,wt]:ahbImportCache) updateDS(wt.ds, wt.view);
     if (cursorDS!=VK_NULL_HANDLE&&cursorView!=VK_NULL_HANDLE) updateDS(cursorDS, cursorView);
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setUpscaler(int mode) {
+    if (mode<0||mode>5) mode=0;
+    if (upscalerMode==mode) { RLOG("setUpscaler: already %d, skipping", mode); return; }
+    RLOG("setUpscaler: %d -> %d", upscalerMode, mode);
+    upscalerMode=mode;
+    // Modes 1/2 are "no shader upscaler"; they just drive the base sampler filter
+    // (linear/nearest) exactly like setFilterMode. Modes 3-5 engage the shader
+    // post-passes and sample the offscreen target through upscaleSampler instead.
+    if      (mode==1) setFilterMode(0);   // linear
+    else if (mode==2) setFilterMode(1);   // nearest
     needsRender.store(true); dirtyCV.notify_one();
 }
 

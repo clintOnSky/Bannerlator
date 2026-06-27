@@ -455,6 +455,32 @@ private fun GraphicsContent(state: XServerDrawerState) {
 
     HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
+    // Scaling mode (Vulkan spatial upscaler). Vulkan-only — the inverse of effectsSupported
+    // (which is GL-only). Single source of truth for scaling/filtering on the Vulkan renderer:
+    // modes 1/2 also drive the base sampler filter natively. Drawer-only / session-live.
+    val initUpscalerMode by XServerDialogState.upscalerMode.collectAsState()
+    val vulkanSupported  by XServerDialogState.vulkanSupported.collectAsState()
+    // Key on the live value so the picker reflects the seeded/launch config and doesn't
+    // capture a stale default (same pattern as the SGSR/HUD controls above).
+    var upscalerMode by remember(initUpscalerMode) { mutableIntStateOf(initUpscalerMode) }
+
+    Text("Scaling mode", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(8.dp))
+    UpscalerModeButtons(upscalerMode, vulkanSupported) {
+        upscalerMode = it
+        XServerDialogState.onUpscalerApply?.invoke(it)
+    }
+    if (!vulkanSupported) {
+        Text(
+            "Scaling mode requires the Vulkan renderer",
+            color = DimWhite.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 12.dp, top = 2.dp)
+        )
+    }
+
+    HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+
     Text("Screen Effects", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))
 
@@ -636,6 +662,54 @@ private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
 
 private fun pushSgsrUpdate(enabled: Boolean, sharpness: Int, hdr: Boolean) {
     XServerDialogState.onSgsrUpdate?.invoke(enabled, sharpness, hdr)
+}
+
+// Scaling-mode picker: 6 options (0=None 1=Linear 2=Nearest 3=SGSR 4=FSR 5=FSR Fit) laid
+// out as two rows of segmented chips (same box-chip idiom as FgMultiplierButtons). Grayed
+// out when the active host renderer is not Vulkan.
+@Composable
+private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
+    val options = listOf(
+        0 to "None", 1 to "Linear", 2 to "Nearest",
+        3 to "SGSR", 4 to "FSR", 5 to "FSR (Fit)"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.chunked(3).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                row.forEach { (mode, label) ->
+                    val isSel = selected == mode
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSel && enabled) Primary else Color.Black)
+                            .border(
+                                width = 1.dp,
+                                color = if (isSel && enabled) Primary else PrimaryDim,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable(enabled = enabled) { onSelect(mode) }
+                            .padding(vertical = 9.dp)
+                    ) {
+                        Text(
+                            label,
+                            color = when {
+                                !enabled -> DimWhite.copy(alpha = 0.4f)
+                                isSel    -> Color.Black
+                                else     -> Primary
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = if (isSel && enabled) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -105,6 +105,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeSetVerboseLog(long handle, boolean v);
     private native void nativeDumpRendererInfo(long handle);
     private native void nativeSetFilterMode(long handle, int mode);
+    private native void nativeSetUpscaler(long handle, int mode);
     private native void nativeSetSwapRB(long handle, boolean enabled);
     private native void nativeSetPresentMode(long handle, int mode);
     private native int[] nativeGetSupportedPresentModes(long handle);
@@ -140,6 +141,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 if (nativeHandle != 0) {
                     nativeSetPresentMode(nativeHandle, pendingPresentMode);
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
+                    nativeSetUpscaler(nativeHandle, pendingUpscaler);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     updateTransform();
                     nativeSetCursorVisible(nativeHandle, cursorVisible);
@@ -683,6 +685,15 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) { if (nativeHandle != 0) nativeSetFilterMode(nativeHandle, mode); }
     }
 
+    // Scaling mode (spatial upscaler). Enum mirrors the native side:
+    //   0=none 1=linear 2=nearest 3=sgsr 4=fsr(fill) 5=fsr_fit(letterbox)
+    // Modes 1/2 also set the base sampler filter natively; modes 3-5 run the
+    // SGSR/FSR shader passes (only when the game renders below display res).
+    public void setUpscaler(int mode) {
+        pendingUpscaler = mode;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetUpscaler(nativeHandle, mode); }
+    }
+
     public void setSwapRB(boolean enabled) {
         pendingSwapRB = enabled;
         synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
@@ -734,6 +745,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private int fpsLimit = 0;
     private int     pendingPresentMode    = 2;
     private int     pendingFilterMode     = 0;
+    private int     pendingUpscaler       = 0;
     private boolean pendingSwapRB         = false;
     public int getFpsLimit() { return fpsLimit; }
     public void setFpsLimit(int limit) {

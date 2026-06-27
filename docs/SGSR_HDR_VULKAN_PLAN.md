@@ -208,7 +208,41 @@ HDR remains parked (Section 2) until Android WSI HDR-surface availability improv
 
 ---
 
-## 7. Change log
+## 7. SOURCES & CREDITS (provenance — who/what each piece comes from)
+
+Our project is **GPL-3.0** (per README; the `LICENSE` file is a leftover MIT from the Winlator/BrunoSX origin).
+All sources below are **license-compatible with GPL-3.0** and require **attribution only**. Action item: add each
+to the README "credited below" section when the corresponding code lands.
+
+### Code/shaders we BUNDLE (verbatim or adapted — license notice required in-file)
+| Piece | From | Author / credit | License | Compat w/ GPL-3.0 | Where we put it |
+|---|---|---|---|---|---|
+| **SGSR 1.0** spatial shader | `github.com/SnapdragonGameStudios/snapdragon-gsr` → `sgsr/v1/` | **Qualcomm Technologies, Inc. / Snapdragon Game Studios** | **BSD-3-Clause** | ✅ (keep copyright + disclaimer) | `cpp/winlator/sgsr.frag` + `sgsr_frag.h` |
+| **FSR 1.0 EASU + RCAS** | `github.com/GPUOpen-Effects/FidelityFX-FSR` → `ffx_fsr1.h` | **Advanced Micro Devices, Inc. (AMD GPUOpen / FidelityFX)** | **MIT** | ✅ (keep notice) | `cpp/winlator/fsr_easu.frag`, `fsr_rcas.frag` + headers |
+
+### Approach/design we REIMPLEMENT (NOT copying code — credit as inspiration)
+| Idea | From | Author / credit | License | Note |
+|---|---|---|---|---|
+| Present-time FSR1 in the Vulkan compositor (blueprint); **FSR-Fit** aspect-preserving mode | GameNative v0.9.1 `github.com/utkarshdalal/GameNative` | **utkarshdalal & GameNative contributors** | GPL-3.0 (same as us) | Reimplementing for clean provenance; GPL would also permit verbatim reuse if ever needed |
+| Lean GLES2 pipeline + CAS "Super Resolution" + **Native Rendering+** direct scanout (Phase 4 / our ASR lineage) | GameHub 5.3.5 (`com.xj.winemu`, `libxserver.so`) | **Xiaoji / GameHub** (proprietary) | proprietary | Inspiration only — no code taken; clean-room |
+| Generic ReShade-style `.fx` effect engine (Phase 3) | GameHub 6.0.x effect engine; ReShade concept | **Crosire (ReShade)** / GameHub | ReShade = BSD-3 (if any code reused) | Phase 3; decide source when scoped |
+| Mobile-optimized EASU (fp16 tap rework — possible future) | atyuwen "Optimizing AMD FSR for Mobiles" | **atyuwen** (blog + gist) | (blog/gist; confirm before reuse) | Only if we add an fp16 mobile EASU path later |
+
+### Deferred-HDR references (not used yet — Section 2)
+| Piece | From | Author | License |
+|---|---|---|---|
+| Inverse-tonemap + PQ/HDR10 math (if we ever do HDR) | libplacebo `github.com/haasn/libplacebo` | **Niklas Haas** | LGPL-2.1+ (GPL-3.0 compatible) |
+| HDR10 passthrough (env `DXVK_HDR`) | DXVK `github.com/doitsujin/dxvk` | **Philip Rebohle (doitsujin) & contributors** | zlib/libpng |
+
+### Our existing base (lineage already credited in README)
+- Vulkan compositor + X-server: **Winlator** (`brunodev85`) → cmod → Bionic Nightly → **Star Bionic** (`star-emu/star`) → marcescence → Bannerlator.
+- Existing GL effects (`renderer/effects/FSREffect`=CAS, `HDREffect`, FXAA/CRT/Toon/NTSC) already in-tree from that lineage.
+
+**Attribution discipline:** (1) keep the upstream copyright header inside each shader file (BSD-3 for SGSR, MIT for FSR);
+(2) add a line to README credits per bundled source; (3) note "approach inspired by GameNative/GameHub" in the relevant
+source comments without copying their code.
+
+## 8. Change log
 - 2026-06-26 — Research complete (upscaler survey, HDR survey, native compositor recon). Plan drafted. No code.
 - 2026-06-26 — Cross-fork comparison added (GH 6.0.9, GH 5.3.5 GLES2, GameNative, Ludashi). Decisions locked (§4): SGSR+FSR1+FSR-Fit,
   HDR deferred, offline `.spv`, in-game drawer, invest in GL path too, port GL effects to Vulkan + generic effect engine. 4-phase roadmap (§6).

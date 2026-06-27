@@ -1643,7 +1643,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String pm = container.getRendererPresentMode();
             int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
             vkRenderer.setVkPresentMode(pmInt);
-            vkRenderer.setFilterMode(container.getRendererFilterMode() == 1 ? 1 : 0);
+            // Scaling mode owns the base sampler filter on Vulkan (modes 1/2 call setFilterMode
+            // internally), so drive the launch through setUpscaler instead of a separate
+            // setFilterMode call — keeping the in-game "Scaling mode" picker the single source of
+            // truth for scaling/filtering. Seed it from the container's saved filter mode
+            // (0=nearest -> upscaler 2, 1=linear -> upscaler 1) and mirror it into the drawer.
+            int initialUpscaler = container.getRendererFilterMode() == 1 ? 1 : 2;
+            vkRenderer.setUpscaler(initialUpscaler);
+            XServerDialogState.INSTANCE.setUpscalerMode(initialUpscaler);
             vkRenderer.setSwapRB(container.getRendererSwapRB());
             // Must run before the surface is created so onSurfaceCreated sets up the scanout path.
             boolean nativeOn = container.isRendererNative();
@@ -1780,6 +1787,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // those toggles out instead of showing dead switches.
         XServerDialogState.INSTANCE.setEffectsSupported(renderer instanceof GLRenderer);
         XServerDialogState ds = XServerDialogState.INSTANCE;
+
+        // Scaling mode (spatial upscaler) is a Vulkan-only control — the inverse of the GL-only
+        // effects above. Flag it for the drawer gate and wire the apply callback here, BEFORE the
+        // GL-only early return below, so it works on the Vulkan renderer. setUpscaler covers
+        // modes 0..5 and drives the base sampler filter for modes 1/2 (single source of truth).
+        boolean vulkanActive = renderer instanceof com.winlator.star.renderer.vulkan.VulkanRenderer;
+        ds.setVulkanSupported(vulkanActive);
+        if (vulkanActive) {
+            com.winlator.star.renderer.vulkan.VulkanRenderer vkr =
+                (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
+            ds.onUpscalerApply = (mode) -> vkr.setUpscaler(mode);
+        } else {
+            ds.onUpscalerApply = null;
+        }
 
         // Input Controls state (renderer-independent: controller profiles + vibration work on
         // BOTH the GL and Vulkan host renderers, so this must run before the GL-only guard below.

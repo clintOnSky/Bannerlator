@@ -61,6 +61,25 @@ object XServerDialogState {
     @JvmField var onSgsrUpdate: SgsrUpdateCallback? = null
 
     // -------------------------------------------------------------------------
+    // Scaling mode (Vulkan spatial upscaler)
+    // -------------------------------------------------------------------------
+    // 0=none 1=linear 2=nearest 3=sgsr 4=fsr(fill) 5=fsr_fit(letterbox). Drawer-only /
+    // session-live (not persisted to the Container). Modes 1/2 also drive the base sampler
+    // filter natively, so this is the single source of truth for Vulkan scaling/filtering.
+    private val _upscalerMode = MutableStateFlow(0)
+    val upscalerMode: StateFlow<Int> = _upscalerMode
+    fun setUpscalerMode(v: Int) { _upscalerMode.value = v }
+
+    // The spatial upscaler lives on the Vulkan renderer only (inverse of effectsSupported,
+    // which is GL-only). False on the OpenGL and SurfaceFlinger renderers -> grays the picker.
+    private val _vulkanSupported = MutableStateFlow(false)
+    val vulkanSupported: StateFlow<Boolean> = _vulkanSupported
+    fun setVulkanSupported(v: Boolean) { _vulkanSupported.value = v }
+
+    fun interface UpscalerApplyCallback { fun invoke(mode: Int) }
+    @JvmField var onUpscalerApply: UpscalerApplyCallback? = null
+
+    // -------------------------------------------------------------------------
     // Vibration dialog
     // -------------------------------------------------------------------------
     private val _vibrationSlots = MutableStateFlow<List<Pair<String, Boolean>>>(emptyList())
@@ -264,6 +283,8 @@ object XServerDialogState {
         _sgsrEnabled.value     = false
         _sgsrSharpness.value   = 50
         _hdrEnabled.value      = false
+        _upscalerMode.value    = 0
+        _vulkanSupported.value = false
         _vibrationSlots.value  = emptyList()
         _logLines.value        = emptyList()
         _logPaused.value       = false
@@ -290,6 +311,7 @@ object XServerDialogState {
         _tmCount.value         = 0
         onMagnifierZoom = null; onMagnifierHide = null
         onSgsrUpdate = null
+        onUpscalerApply = null
         onVibrationSlotChanged = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null
