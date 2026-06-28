@@ -30,8 +30,18 @@ SAME device (Adreno 750), AIO graphics test app, renderer = **OpenGL | DXVK**.
 is doing bilinear; base-sampler labels (None/Linear/Nearest) worth a look. Pairs with the known CAS/Sharpen
 slider-snapping inconsistency (GL 5-notch vs VK continuous).
 
-**▶️ NEXT:** (a) test debanding on **Detailed Nebula** for the visual showcase, then (b) MERGE `feat/deband-nis`
-to main (no device tests outstanding), then (c) START STEP 2 = VRR / refresh-rate matching (plan in detail memory).
+**Debanding RE-TESTED on "Detailed Nebula" (s3, GL, frozen-frame A/B):** mechanism re-confirmed (game-area
+max diff = exactly 1/255, mean-preserving); positive dither-footprint = fine stipple noise, ~8.8% of pixels in
+the glow falloff nudged 1 LSB, densest at quantization boundaries. BUT even hard-amplified on the brightest
+smooth ramp, OFF vs ON look identical — Nebula shows NO gross banding to dramatize either. CONCLUSION: AIO
+test scenes render gradients clean enough that 8-bit banding is minimal in both Space & Nebula; debanding's
+gain is real but sub-perceptual on THIS content (will matter on real games w/ heavy banding — fog/skyboxes/UE).
+Build is dither-only on 8-bit chain (precision-bump step deferred). Note: whole-frame RMSE is meaningless here
+(drawer changes between shots) — always crop to game area x>900.
+
+**▶️ NEXT:** (a) MERGE `feat/deband-nis` to main (FULLY device-proven, no tests outstanding), then
+(b) START STEP 2 = VRR / refresh-rate matching (plan in detail memory). Optional: precision-bump (10-bit/R16F
+intermediate) would make debanding visibly stronger — revisit only if a real game shows banding.
 
 ---
 
