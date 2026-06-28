@@ -1899,3 +1899,5 @@ Last CI: `24577265773` ✅ green
 - Fix later: add `steps=3` to the two VK sliders, or drop `steps` on the two GL ones (lean continuous-everywhere; GL keeps notches only for the "stop 0 = OFF" guarantee).
 
 **UPDATE 2026-06-28 (later):** ✅ OpenGL NIS DEVICE-PROVEN — user: "it worked like vulkan". Adreno GL shader-compile risk CLEARED. NIS now proven on BOTH renderers, matching looks. (Install: NIS vc32 needed `pm install -r -d` over the bionic-fg vc33 build via root bridge.) NIS feature merge-ready; debanding (other half of branch) may want a quick dark-gradient check before merge.
+
+**RESUME POINT (2026-06-28, user driving home):** Step 1 NIS = DONE, device-proven both renderers. NEXT SESSION = **Step 2: VRR / refresh-rate matching** (full plan in roadmap memory file). Open optional threads to fold in: (a) debanding dark-gradient check + merge `feat/deband-nis` to main; (b) CAS/Sharpen snapping cleanup (GL 5-notch vs VK continuous). Branch tip `cc3361f`, pushed, unmerged.
