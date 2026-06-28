@@ -57,7 +57,7 @@
 
 ## 🆕 What's New in 2.0
 
-The graphics-enhancement program is now **complete across both renderers**. Version 1.9.2 brought real spatial upscaling and the full effect chain to the **Vulkan** renderer; **2.0 brings the same upscaler suite to the OpenGL renderer**, retunes every sharpness slider, fixes the magnifier, adds a FEXCore TSO preset, and **adds Turnip support for Android 10 / older devices**.
+The graphics-enhancement program is now **complete across both renderers**, plus a redesigned game/container UI, a few quality-of-life features, and broader device support. 1.9.2 brought real spatial upscaling and the full effect chain to the **Vulkan** renderer; **2.0 brings the same upscaler suite to the OpenGL renderer**, retunes every sharpness slider, fixes the magnifier, redesigns the game and container cards, auto-closes a session when the game quits, adds a FEXCore TSO preset, and **adds Turnip support for Android 10 / older devices**.
 
 **🖼️ OpenGL renderer upscalers (new) — full parity with Vulkan.** The same **Scaling mode** picker is now live in the in-game drawer on the **OpenGL** renderer too: **SGSR**, **FSR** / **FSR-Fit**, **Sharpen**, plus **Linear** / **Nearest**. The OpenGL path renders the scene at a reduced internal resolution and reconstructs it back up — so you can get a sharper image *and* a performance headroom on the OpenGL renderer, not just Vulkan.
 
@@ -65,6 +65,12 @@ The graphics-enhancement program is now **complete across both renderers**. Vers
 - **SGSR** sharpness range **doubled** for a much stronger effect at the top end.
 - **FSR / Sharpen** now pass through completely untouched at 0 (previously they always added a little sharpening).
 - The **Sharpen** mode snaps to **5 clear steps** (0 / 25 / 50 / 75 / 100), since its sharpening has five discrete levels — no more dead slider travel.
+
+**🛠️ OpenGL renderer plumbing.** The **filter mode** (Nearest / Linear) is now a real, live setting on the OpenGL renderer — the in-game cursor stays sharp under Nearest — and trivial copy stages use a faster `glBlitFramebuffer` path.
+
+**🃏 Redesigned game & container cards.** The **Games** list and **Containers** list now share a cleaner, consistent card design: a primary row of chips (renderer · DXVK · frame-gen) over a muted secondary line (driver · VKD3D · backend), with the resolution in the subtitle. This also fixes long driver / component names crowding out or blanking the game title and pushing the ⋮ menu off-screen.
+
+**🚪 Auto-close on game exit.** When you launch a game from the library or a shortcut, the Wine session now **closes itself once the game quits** — no more black Wine desktop left behind. There's a per-container **"Close when game exits"** toggle (on by default) and a per-shortcut override.
 
 **🔍 Magnifier fixed.** The in-game **Magnifier** (zoom) overlay now works on the **default Vulkan renderer** (and the others) — previously its +/− buttons did nothing unless you were on OpenGL.
 
@@ -117,12 +123,15 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 
 ### 📦 Containers
 - Create and manage **multiple isolated Wine containers**.
+- **Redesigned container cards** — a clean spec-chip layout (renderer · DXVK on top, driver · VKD3D · backend beneath) that matches the game cards.
+- **Auto-close on game exit** — the session closes itself once the launched game quits (per-container "Close when game exits" toggle, on by default), so you're not left at a black Wine desktop.
 - **Import / export** containers to move or back up setups.
 - Per-container control of Wine version, graphics driver, DXVK / VKD3D version, Box64 preset, drive mappings, Z-drive selector, and environment variables.
 - **Compatibility Layers download menu** — a cloud button on each component (Wine/Proton, DXVK, VKD3D, Box64/WOWBox64, FEXCore) opens a downloader to browse, install or remove versions, with **Wine/Proton tabs**, an **"in use"** marker, **install-from-file**, and **byte-accurate download + install progress bars**.
 
 ### 🕹️ Games, shortcuts & input
 - **Game library** with grid or list layout, sorting, and installed/updated filters.
+- **Redesigned game cards** — primary chips (renderer · DXVK · frame-gen) over a muted driver · VKD3D · backend line, with the resolution in the subtitle; long component names no longer blank the game title.
 - Add shortcuts from external storage.
 - **SteamGridDB** cover-art scraping.
 - Per-game settings including display language / locale.
