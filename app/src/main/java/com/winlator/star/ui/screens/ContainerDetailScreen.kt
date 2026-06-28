@@ -670,6 +670,23 @@ private fun TopLevelFields(
             )
         }
 
+        // Match refresh rate to FPS (VRR). Votes the panel cadence to follow the game's FPS; safe to
+        // leave on (no-op unless the FPS limiter is actually capping). Can also be toggled live in-game.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = viewModel.matchRefreshRate,
+                onCheckedChange = { viewModel.matchRefreshRate = it }
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.match_refresh_rate), modifier = Modifier.weight(1f))
+        }
+        Text(
+            text = stringResource(R.string.match_refresh_rate_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 52.dp, top = 2.dp, bottom = 4.dp)
+        )
+
         // LC_ALL
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(

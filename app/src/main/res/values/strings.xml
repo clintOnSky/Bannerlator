@@ -476,6 +476,8 @@
     <string name="frame_generation_lsfg_hint">Uses your imported Lossless.dll (set it at the bottom of Settings). Tune the multiplier &amp; flow scale live from the in-game side menu.</string>
     <string name="fps_limiter">FPS Limiter</string>
     <string name="fps_limiter_ingame_hint">Loads the limiter; set the cap (10–200) live from the in-game FPS menu.</string>
+    <string name="match_refresh_rate">Match refresh rate to FPS</string>
+    <string name="match_refresh_rate_hint">Votes the display refresh rate to follow the game\'s FPS (smoother motion + power saving). Only acts while the FPS limiter is capping; otherwise the panel runs free.</string>
     <string name="export_container">Export Container</string>
     <string name="exporting_container">Exporting Container...</string>
     <string name="importing_container">Importing Container...</string>
