@@ -2933,6 +2933,16 @@ return true;
         return container.isFpsLimiterEnabled();
     }
 
+    // Per-game override for VRR / refresh-rate matching (shortcut wins over the container default).
+    // Mirrors resolvedFpsLimiterEnabled(). Null-safe for early calls before the container is loaded.
+    private boolean resolvedMatchRefreshRate() {
+        if (container == null) return false;
+        if (shortcut != null) {
+            return shortcut.getExtra("matchRefreshRate", container.isMatchRefreshRate() ? "1" : "0").equals("1");
+        }
+        return container.isMatchRefreshRate();
+    }
+
     // lsfg-vk does its OWN frame pacing when it is multiplying (multiplier >= 2). Layering the
     // standalone IdleNotify limiter on top double-paces the present stream: our pacer throttles
     // lsfg's already-multiplied output, clamping the panel to the limiter value (killing the FG

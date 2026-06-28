@@ -427,6 +427,17 @@ public class Container {
         putExtra("fpsLimiterValue", String.valueOf(value));
     }
 
+    // Match the Android display refresh rate to the game's FPS (votes Surface.setFrameRate). Default
+    // ON: it's safe because it only ever votes a rate while the FPS limiter is actually capping;
+    // otherwise it votes 0 (no-op / panel runs free). Complementary to the limiter (producer rate).
+    public boolean isMatchRefreshRate() {
+        return getExtra("matchRefreshRate", "1").equals("1");
+    }
+
+    public void setMatchRefreshRate(boolean enabled) {
+        putExtra("matchRefreshRate", enabled ? "1" : "0");
+    }
+
     public String getWineVersion() {
         return wineVersion;
     }
