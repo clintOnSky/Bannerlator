@@ -2,6 +2,25 @@
 
 ---
 
+## 2026-06-27 — 🏷️ 2.0 STABLE RELEASE CUT
+
+Merged the #18 turnip-ICD branch to main, bumped to **2.0 (versionCode 32)**, rewrote the README
+"What's New in 2.0" + feature sections, and cut the **2.0 stable release** (run `28309799973`,
+prerelease:false + make_latest:true → now the Latest the in-app updater offers; 3 flavor APKs +
+update.json attached). Closed PR #24 (not merged).
+
+**Everything in 2.0 since 1.9.2:** OpenGL renderer upscaler parity (SGSR/FSR/Sharpen) · sharpness
+sliders retuned (0=off→100=max, SGSR doubled, Sharpen 5-stop snap, inverted-CAS fix) · OpenGL
+filter-mode + glBlitFramebuffer plumbing (P4) · **game + container card redesign (#19)** ·
+**auto-close session on game exit** · magnifier fix on Vulkan (#22) · FEXCore "Performance (TSO)"
+preset (#20) · **Android-10 direct-ICD turnip driver (#18)**.
+
+README/release note imageFS-reinstall reminder added (new turnip driver lives in imageFS).
+Pinged issue #18 reporter (SD845/A10) to verify the new `turnip-26.1.0` driver — issue left open
+pending their confirmation (no A10 device locally).
+
+---
+
 ## 2026-06-27 — #18 direct-ICD turnip path for Android <11 (built, CI-green, awaiting reporter A10 test)
 
 Diagnosis: the reporter's A10/SD845 problem is the driver LOADING MECHANISM — Bannerlator loads
