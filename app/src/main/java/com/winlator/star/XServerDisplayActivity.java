@@ -566,6 +566,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (limitVal > 0) container.setFpsLimiterValue(limitVal);
             container.saveData();
         };
+        // VRR / refresh-rate matching toggle. Persists to the container and re-votes the panel
+        // refresh rate live (applyVrr). Independent of frame-gen; works on all 3 host renderers.
+        state.onMatchRefreshChange = () -> {
+            boolean on = XServerDrawerState.INSTANCE.getMatchRefreshRate().getValue();
+            container.setMatchRefreshRate(on);
+            container.saveData();
+            reapplyVrr();
+        };
         state.onToggleFullscreen       = () -> {
             xServerView.getRenderer().toggleFullscreen();
             touchpadView.toggleFullscreen();
@@ -741,6 +749,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
         XServerDrawerState.INSTANCE.setFpsLimiterEnabled(fpsLimOn);
         XServerDrawerState.INSTANCE.setFpsLimit(container.getFpsLimiterValue());
+        XServerDrawerState.INSTANCE.setMatchRefreshRate(resolvedMatchRefreshRate());
 
         containerManager.activateContainer(container);
 

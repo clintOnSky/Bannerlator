@@ -933,6 +933,22 @@ private fun HudContent(state: XServerDrawerState) {
         )
     }
 
+    // ── VRR: match the display panel's refresh rate to the on-screen FPS ──
+    val matchRefreshRate by state.matchRefreshRate.collectAsState()
+    var matchRefreshOn by remember(matchRefreshRate) { mutableStateOf(matchRefreshRate) }
+    ToggleRow("Match refresh rate to FPS", matchRefreshOn) {
+        matchRefreshOn = it
+        state.setMatchRefreshRate(it)
+        state.onMatchRefreshChange?.run()
+    }
+    Text(
+        "Votes the display refresh rate to follow the game's FPS (smoother + power saving). " +
+            "Only acts while the FPS limiter is capping.",
+        color = DimWhite.copy(alpha = 0.5f),
+        fontSize = 11.sp,
+        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+    )
+
     HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
     fun parseConfig(s: String): Map<String, String> {
