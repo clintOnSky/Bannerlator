@@ -28,6 +28,7 @@
         <item>System</item>
         <item>v819</item>
         <item>turnip-sdk36</item>
+        <item>turnip-26.1.0</item>
     </string-array>
     <string-array name="audio_driver_entries">
         <item>ALSA</item>
