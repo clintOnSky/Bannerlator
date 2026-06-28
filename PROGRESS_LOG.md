@@ -2,7 +2,7 @@
 
 ---
 
-## 2026-06-28 (s4) — ✅✅ VRR device-test #3: WORKING — panel drops 144→60 to match the FPS cap
+## 2026-06-28 (s4) — ✅✅ VRR device-test #3: WORKING (+ clear-path verified) — panel drops 144→60 to match the FPS cap
 
 Build `28332650876` (seamless fix `c29acc0` + capability gating `83da657` + window-pin fix `35dd636`). On
 Vulkan, FPS cap 60, Match-refresh ON, game foreground: **activeMode 144.00→60.00 Hz** — the panel physically
@@ -14,6 +14,10 @@ auto-VRR and a future manual refresh-rate picker will work here.
 (shared code, Vulkan proven). **Next feature (green-lit):** manual refresh-rate picker — one control with
 'Auto (match FPS)' + manual snap-to-supported-modes (60/90/120/144 auto-detected via getSupportedModes); Auto
 greys the slider; whole control greys on single-mode/pre-A11 devices. Same `preferredRefreshRate` lever.
+
+
+**Clear-path verified (test #3b):** toggling "Match refresh rate to FPS" OFF returned the panel 144 Hz (activeMode 60→144, both votes restored to 144). So VRR does the full round trip — drops to the cap when on, restores max when off. **VRR is fully verified and ready to merge.**
+
 
 ---
 
