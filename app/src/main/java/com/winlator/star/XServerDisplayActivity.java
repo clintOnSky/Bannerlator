@@ -3027,6 +3027,23 @@ return true;
             }
         }
         xServerView.setDisplayFrameRate(vrrRate, VRR_FRAME_RATE_COMPATIBILITY);
+        // onCreate pins the window's preferredRefreshRate to the panel max (for smooth UI). That
+        // window-level request out-votes the VRR surface vote, so the panel never leaves max. When VRR is
+        // matching a capped rate, lower the window preference to that rate too; otherwise restore the max.
+        applyWindowPreferredRefreshRate(vrrRate);
+    }
+
+    // Keep the window's preferred refresh rate in step with VRR so it doesn't fight the surface vote.
+    // vrrRate > 0 -> prefer that exact rate (the panel switches to the matching mode); 0 -> restore max.
+    private void applyWindowPreferredRefreshRate(float vrrRate) {
+        runOnUiThread(() -> {
+            android.view.WindowManager.LayoutParams p = getWindow().getAttributes();
+            float desired = vrrRate > 0f ? vrrRate : pickHighestRefreshRate();
+            if (p.preferredRefreshRate != desired) {
+                p.preferredRefreshRate = desired;
+                getWindow().setAttributes(p);
+            }
+        });
     }
 
     // Re-apply the VRR vote from the current remembered limiter state (used on resume and when the
