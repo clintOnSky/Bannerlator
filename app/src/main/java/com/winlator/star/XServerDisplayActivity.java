@@ -3337,8 +3337,12 @@ return true;
     }
 
     private void showMagnifierOverlay() {
-        HostRenderer _r = xServerView != null ? xServerView.getRenderer() : null;
-        GLRenderer r = _r instanceof GLRenderer ? (GLRenderer)_r : null;
+        // Drive the magnifier through the HostRenderer interface (declares get/setMagnifierZoom,
+        // implemented by GL, Vulkan and ASR). The old code cast to GLRenderer and no-op'd for
+        // any other renderer, so on the default Vulkan renderer the overlay opened stuck at 100%
+        // and the +/- buttons did nothing (issue #22). VulkanRenderer.setMagnifierZoom applies
+        // the zoom live via updateTransform().
+        HostRenderer r = xServerView != null ? xServerView.getRenderer() : null;
         XServerDialogState ds = XServerDialogState.INSTANCE;
 
         ds.setMagnifierZoom(r != null ? r.getMagnifierZoom() : 1.0f);
