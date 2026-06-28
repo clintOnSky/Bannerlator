@@ -2,6 +2,24 @@
 
 ---
 
+## 2026-06-27 — #18 direct-ICD turnip path for Android <11 (built, CI-green, awaiting reporter A10 test)
+
+Diagnosis: the reporter's A10/SD845 problem is the driver LOADING MECHANISM — Bannerlator loads
+turnip via adrenotools (linkernsbypass hook, needs ~A11+); Winlator loads it as a plain system
+Vulkan ICD (works on any Android). Also closed PR #24 (strlcpy/snprintf — original code already
+safe).
+
+Branch `feat/turnip-icd-direct-android10` off main (`f43a319`), commits `60038cf` + `971c415`,
+CI `28309292459` ✅ green, **NOT merged, NOT device-tested** (no A10 hardware here). New driver
+option `turnip-26.1.0` (Winlator's Mesa Turnip 26.1.0, ICD format) that installs the freedreno
+ICD + .so into the guest, points `VK_ICD_FILENAMES` at it, and **skips the adrenotools env**
+entirely — bypassing the A11+ hook. Picker filter special-cased to gate on `isAdrenoGPU()` (the
+normal adrenotools probe is exactly what fails on A10). Adrenotools path untouched; default still
+turnip-sdk36. Top residual risk: host-vs-guest path assumption (if proot-remapped, library_path
+would need a guest path). NEXT: reporter verifies a CI build on their SD845 → then merge.
+
+---
+
 ## 2026-06-27 — Implement open issues #22 (magnifier) + #20 (FEX Performance+TSO preset)
 
 gl-upscaler-parity merged to main (`6d5f75b`). Branch `fix/issues-22-magnifier-20-fextso` off
