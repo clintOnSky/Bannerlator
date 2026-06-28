@@ -16,7 +16,7 @@ auto-VRR and a future manual refresh-rate picker will work here.
 greys the slider; whole control greys on single-mode/pre-A11 devices. Same `preferredRefreshRate` lever.
 
 
-**Clear-path verified (test #3b):** toggling "Match refresh rate to FPS" OFF returned the panel 144 Hz (activeMode 60→144, both votes restored to 144). So VRR does the full round trip — drops to the cap when on, restores max when off. **VRR is fully verified and ready to merge.**
+**Clear-path verified (test #3b):** toggling "Match refresh rate to FPS" OFF returned the panel 144 Hz (activeMode 60→144, both votes restored to 144). So VRR does the full round trip — drops to the cap when on, restores max when off. Also verified the cap-dependency: limiter OFF + match ON (uncapped) → panel returns to 144 (VRR only acts while capping). All 4 states confirmed {ON+match→60, ON+nomatch→144, OFF+match→144, incapable→greyed}. **VRR comprehensively verified and ready to merge.**
 
 
 ---
