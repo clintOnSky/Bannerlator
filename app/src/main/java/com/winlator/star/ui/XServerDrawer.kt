@@ -847,10 +847,18 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
 // while dragging; the actual panel rate is applied on release so we don't flash through modes mid-drag.
 // Greyed when disabled (Auto on or display not VRR-capable).
 @Composable
-private fun RefreshRateSlider(rates: List<Int>, selected: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
+private fun RefreshRateSlider(rates: List<Int>, selected: Int, enabled: Boolean, autoRate: Int, onSelect: (Int) -> Unit) {
     val stops = remember(rates) { listOf(0) + rates }
     var idx by remember(selected, stops) { mutableStateOf(stops.indexOf(selected).coerceAtLeast(0)) }
     val dim = DimWhite.copy(alpha = 0.4f)
+    // When the slider is disabled by Auto, the manual selection is meaningless — show the live actual
+    // display rate instead, kept in normal blue so it reads as a real value, not a greyed leftover.
+    val showAuto = !enabled && autoRate > 0
+    val rightText = when {
+        showAuto -> "$autoRate Hz"
+        stops[idx] == 0 -> "Off"
+        else -> "${stops[idx]} Hz"
+    }
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -859,9 +867,9 @@ private fun RefreshRateSlider(rates: List<Int>, selected: Int, enabled: Boolean,
         ) {
             Text("Rate", style = MaterialTheme.typography.bodySmall, color = if (enabled) DimWhite else dim)
             Text(
-                if (stops[idx] == 0) "Off" else "${stops[idx]} Hz",
+                rightText,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (enabled) Primary else dim,
+                color = if (enabled || showAuto) Primary else dim,
                 fontWeight = FontWeight.Medium
             )
         }
@@ -949,6 +957,10 @@ private fun SeShaderToggle(label: String, checked: Boolean, enabled: Boolean = t
 private fun HudContent(state: XServerDrawerState) {
     val fpsConfig by state.fpsConfig.collectAsState()
 
+    // Re-read the live display refresh rate when this tab opens so the "Rate" readout is fresh on
+    // open; the display listener keeps it current while the drawer stays open.
+    LaunchedEffect(Unit) { state.onRefreshRatePoll?.run() }
+
     SectionHeader("HUD")
 
     // ── FPS Limiter (standalone host-side cap; output-cap = on-screen fps, independent of frame gen) ──
@@ -987,6 +999,7 @@ private fun HudContent(state: XServerDrawerState) {
     val vrrSupported by state.vrrSupported.collectAsState()
     val manualRefreshRate by state.manualRefreshRate.collectAsState()
     val supportedRefreshRates by state.supportedRefreshRates.collectAsState()
+    val currentRefreshRate by state.currentRefreshRate.collectAsState()
     var matchRefreshOn by remember(matchRefreshRate) { mutableStateOf(matchRefreshRate) }
 
     Text("Refresh rate", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -1001,7 +1014,7 @@ private fun HudContent(state: XServerDrawerState) {
     // Manual rate slider: selectable only when Auto is OFF and the panel can switch rates.
     if (supportedRefreshRates.isNotEmpty()) {
         Spacer(Modifier.height(6.dp))
-        RefreshRateSlider(supportedRefreshRates, manualRefreshRate, vrrSupported && !matchRefreshOn) { rate ->
+        RefreshRateSlider(supportedRefreshRates, manualRefreshRate, vrrSupported && !matchRefreshOn, currentRefreshRate) { rate ->
             state.setManualRefreshRate(rate)
             state.onManualRefreshChange?.run()
         }

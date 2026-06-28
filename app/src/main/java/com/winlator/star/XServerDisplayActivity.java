@@ -582,6 +582,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             container.saveData();
             reapplyVrr();
         };
+        // Drawer HUD/FPS tab opened — refresh the live display-rate readout.
+        state.onRefreshRatePoll = this::updateCurrentRefreshRate;
         state.onToggleFullscreen       = () -> {
             xServerView.getRenderer().toggleFullscreen();
             touchpadView.toggleFullscreen();
@@ -763,6 +765,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setSupportedRefreshRates(
             com.winlator.star.widget.XServerView.getSupportedRefreshRates(getWindowManager().getDefaultDisplay()));
         XServerDrawerState.INSTANCE.setManualRefreshRate(resolvedManualRefreshRate());
+        updateCurrentRefreshRate();
 
         containerManager.activateContainer(container);
 
@@ -1155,6 +1158,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ProcessHelper.resumeAllWineProcesses();
         // Re-assert the VRR vote — onStop() released it when backgrounded.
         reapplyVrr();
+        // Track the live panel rate again (the readout shows it while Auto is on).
+        registerVrrDisplayListener();
+        updateCurrentRefreshRate();
     }
 
     @Override
@@ -1313,6 +1319,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Release the panel refresh-rate vote while backgrounded so we don't pin the display rate
         // for whatever is composited on top. onResume() re-asserts it.
         if (xServerView != null) xServerView.setDisplayFrameRate(0f, VRR_FRAME_RATE_COMPATIBILITY);
+        unregisterVrrDisplayListener();
     }
 
     private void releasePointerCaptureIfNeeded(String reason) {
@@ -3087,6 +3094,38 @@ return true;
         boolean limOn  = s.getFpsLimiterEnabled().getValue();
         int   limitVal = s.getFpsLimit().getValue();
         applyVrr(limOn && limitVal > 0 ? limitVal : 0);
+    }
+
+    // Push the live (actual) display refresh rate into the drawer so the readout can show what the
+    // panel is really running at while Auto (match FPS) is on and the manual slider is greyed.
+    private void updateCurrentRefreshRate() {
+        int rate = com.winlator.star.widget.XServerView.getCurrentRefreshRate(getWindowManager().getDefaultDisplay());
+        XServerDrawerState.INSTANCE.setCurrentRefreshRate(rate);
+    }
+
+    // Listen for panel mode switches so the readout tracks the real rate live (e.g. when VRR drops
+    // the panel 144->60 after a vote). Registered while resumed, released on stop.
+    private android.hardware.display.DisplayManager.DisplayListener vrrDisplayListener;
+
+    private void registerVrrDisplayListener() {
+        if (vrrDisplayListener != null) return;
+        android.hardware.display.DisplayManager dm =
+            (android.hardware.display.DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+        if (dm == null) return;
+        vrrDisplayListener = new android.hardware.display.DisplayManager.DisplayListener() {
+            @Override public void onDisplayAdded(int displayId) {}
+            @Override public void onDisplayRemoved(int displayId) {}
+            @Override public void onDisplayChanged(int displayId) { updateCurrentRefreshRate(); }
+        };
+        dm.registerDisplayListener(vrrDisplayListener, handler);
+    }
+
+    private void unregisterVrrDisplayListener() {
+        if (vrrDisplayListener == null) return;
+        android.hardware.display.DisplayManager dm =
+            (android.hardware.display.DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+        if (dm != null) dm.unregisterDisplayListener(vrrDisplayListener);
+        vrrDisplayListener = null;
     }
 
 

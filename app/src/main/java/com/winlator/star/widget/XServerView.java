@@ -212,6 +212,15 @@ public class XServerView extends FrameLayout {
         return rates.size() > 1;
     }
 
+    /** The display's current (live) refresh rate, rounded. 0 if unavailable. Reflects the panel's
+     *  active mode, so it shows what VRR/Auto actually landed on (not just what we requested). */
+    public static int getCurrentRefreshRate(android.view.Display display) {
+        if (display == null) return 0;
+        android.view.Display.Mode mode = display.getMode();
+        float rate = mode != null ? mode.getRefreshRate() : display.getRefreshRate();
+        return Math.round(rate);
+    }
+
     /** Distinct supported refresh rates (rounded, ascending). Empty if <2 (nothing to pick). */
     public static java.util.List<Integer> getSupportedRefreshRates(android.view.Display display) {
         java.util.TreeSet<Integer> rates = new java.util.TreeSet<>();
