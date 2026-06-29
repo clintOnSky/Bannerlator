@@ -98,3 +98,24 @@ target_link_libraries(asurface_renderer
         atomic
 )
 
+# Small standalone direct-scanout lib for the GL (and any non-Vulkan) renderer.
+# Compiles ScanoutContext.cpp into itself (object duplicated with vulkan_renderer
+# by design — simpler/safer than a third shared lib; ScanoutContext has no global
+# state). Links log/android/dl/atomic only — NO vulkan, NO adrenotools — so a GL
+# container can load it without dragging Vulkan/adreno deps onto the GL path.
+add_library(direct_scanout SHARED
+        scanout/directscanout_jni.cpp
+        scanout/ScanoutContext.cpp
+)
+
+target_compile_options(direct_scanout PRIVATE
+        -Wall -Wextra -fvisibility=hidden -std=c++17
+)
+
+target_link_libraries(direct_scanout
+        log
+        android
+        dl
+        atomic
+)
+
