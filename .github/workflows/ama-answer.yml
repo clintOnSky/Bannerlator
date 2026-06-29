@@ -1,12 +1,12 @@
 name: "🤖 AMA — Answer the AI"
 
 # SECURITY + COST MODEL (public repo):
-# - Auto-answers questions submitted via the Ask-the-AI form (they carry the
-#   `ama-request` label). Normal bug reports / feature requests do NOT trigger it.
+# - Auto-answers EVERY newly opened issue (questions, bug reports, anything).
+#   No form or label required — robust across all devices.
 # - Guardrails cap spend: a per-user daily limit (maintainers exempt) and a
 #   repo-wide monthly cap. Over either limit, the bot posts a friendly notice
 #   instead of running.
-# - A maintainer can force a run on any issue by adding the `question` label.
+# - A maintainer can force a re-run on any older issue by adding the `question` label.
 # - All untrusted text (issue body, question, model answer) is passed via `env:`
 #   and referenced as quoted variables — never inlined into a run:/script: body.
 # - opencode runs sandboxed (bash/write/edit/webfetch off — see ama-agent.md);
@@ -26,10 +26,12 @@ concurrency:
 
 jobs:
   answer:
-    # Run for: a form-submitted question (opened + ama-request label), OR a
-    # maintainer-forced run (question label added). Nothing else.
+    # Run for: ANY newly opened issue, OR a maintainer-forced re-run (question
+    # label added). Skip issues already answered and anything opened by a bot.
     if: >
-      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'ama-request')) ||
+      (github.event.action == 'opened' &&
+        github.event.issue.user.type != 'Bot' &&
+        !contains(github.event.issue.labels.*.name, 'answered')) ||
       (github.event.action == 'labeled' && github.event.label.name == 'question')
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -67,11 +69,12 @@ jobs:
             proceed = false; reason = 'monthly-cap';
           }
 
-          // Per-user daily limit (maintainers exempt).
+          // Per-user daily limit (maintainers exempt). Counts how many of this
+          // author's issues we've already answered in the last day.
           if (proceed && !isMaintainer) {
             const used = await count(
-              `repo:${owner}/${repo} type:issue author:${author} label:ama-request created:>=${dayAgo}`);
-            if (used > PER_USER_PER_DAY) { proceed = false; reason = 'rate-limit'; }
+              `repo:${owner}/${repo} type:issue author:${author} label:answered created:>=${dayAgo}`);
+            if (used >= PER_USER_PER_DAY) { proceed = false; reason = 'rate-limit'; }
           }
 
           core.setOutput('proceed', String(proceed));
@@ -95,8 +98,9 @@ jobs:
       id: question
       if: steps.gate.outputs.proceed == 'true'
       env:
-        # Untrusted. Only ever referenced as the quoted shell var "$BODY".
+        # Untrusted. Only ever referenced as the quoted shell vars below.
         BODY: ${{ github.event.issue.body }}
+        TITLE: ${{ github.event.issue.title }}
       run: |
         QUESTION=$(printf '%s' "$BODY" \
           | sed '/^### Your question$/d' \
@@ -104,6 +108,9 @@ jobs:
         if [ -z "$QUESTION" ]; then
           QUESTION=$(printf '%s' "$BODY")
         fi
+        # Prepend the issue title for context (bug reports often put the whole
+        # ask in the title with an empty body).
+        QUESTION=$(printf 'Title: %s\n\n%s' "$TITLE" "$QUESTION")
         QUESTION=$(printf '%s' "$QUESTION" | head -c 4000)
         {
           echo "q<<__Q_EOF__"
