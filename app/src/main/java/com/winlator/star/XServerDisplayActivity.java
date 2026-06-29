@@ -1258,7 +1258,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // it. effects = <reshade>:cas  (sharpen LAST, the usual order). Returns the host-absolute conf
     // path for VKBASALT_CONFIG_FILE, or null when no ReShade effect is selected (caller then keeps
     // the legacy inline CAS path untouched).
-    private String writeVkBasaltConfig() {
+    private String writeVkBasaltConfig() { return writeVkBasaltConfig(true); }
+
+    // enableOnLaunch controls the live ReShade on/off: our patched libvkbasalt watches this conf's
+    // mtime and re-reads `enableOnLaunch` into presentEffect (passthrough vs effect) WITHOUT a
+    // recompile, so flipping it here is what makes the in-game "Effect" toggle disable the effect
+    // live. The effect stays in the chain (still compiled) either way — only the present is bypassed.
+    private String writeVkBasaltConfig(boolean enableOnLaunch) {
         String effectName = resolvedReshadeEffect();
         if (effectName == null || effectName.equals("None") || effectName.isEmpty()) return null;
         if (!reshadeSupported()) return null; // WineD3D/GL/GDI titles can't carry the layer
@@ -1326,7 +1332,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
 
             sb.append("toggleKey = Home\n");
-            sb.append("enableOnLaunch = True\n");
+            sb.append("enableOnLaunch = ").append(enableOnLaunch ? "True" : "False").append("\n");
 
             File confFile = new File(configDir, "vkBasalt.conf");
             FileUtils.writeString(confFile, sb.toString());
@@ -1435,9 +1441,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         } catch (JSONException ignored) {}
         // Rewrite the conf so a relaunch reflects the new values (resolvedReshadeParams now reads
-        // the freshly-saved JSON). enableOnLaunch stays True; `enabled` is reserved for the live
-        // toggle mechanism. TODO(live-apply): trigger config-watch / X11 Home-inject here.
-        writeVkBasaltConfig();
+        // the freshly-saved JSON) AND so the live config-watch in our patched libvkbasalt picks up
+        // both the new uniform values and the on/off state. `enabled` -> enableOnLaunch: toggling
+        // the drawer "Effect" switch off writes enableOnLaunch=False, which the layer reloads into
+        // presentEffect=false (passthrough) on the next frame -> the effect actually turns off.
+        writeVkBasaltConfig(enabled);
     }
 
     private void savePlaytimeData() {
