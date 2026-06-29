@@ -2274,3 +2274,20 @@ Read both scanout paths (Vulkan works→DEVICE, GL fails→CLIENT) against the d
 - **(c) drop SC scale** = DO NOT — proven not the blocker (shared with working Vulkan path).
 
 **Device tests now CONFIRMATORY, not exploratory:** Vulkan-ON would re-confirm the P0 result (already proven DEVICE on this device); GameHub-GL-ON would independently prove a GL-origin standalone overlay promotes here + hand us the target layer structure. Optional belt-and-suspenders before building fix (a).
+
+---
+
+## 🧪 GAMEHUB 5.3.5 NATIVE-RENDERING+ DEVICE-TESTED 2026-06-29 — ALSO fails to promote (DEVICE/CLIENT), BUT confounded by windowed-desktop mode.
+
+Ran the upstream reference (GameHub 5.3.5, pkg `com.tencent.ig`/`com.xj.winemu.WineActivity` — basis of Banner Hub 3.8.0) on the SAME Adreno750/SD8Gen3, SAME AIO DX11 cube, DXVK, right-side drawer. "Native Rendering+" is a 3-way radio Auto/Disabled/**Force Enable**. dumpsys composition (requested/actual):
+- **Native OFF (Disabled):** `SurfaceView[com.tencent.ig/…WineActivity]#5` = `DEVICE/DEVICE` ✅ (clean fullscreen overlay, RGBX_8888, transform 0, src 720×1280→dst 1080×1920) + VRI `DEVICE/DEVICE`. HUD "DXVK".
+- **Native ON (Force Enable):** HUD flips to "DXVK+". ALL layers `DEVICE/CLIENT` ❌ (requested overlay, HWC REJECTED→GPU): base SurfaceView#5 (still PRESENT, RGBX), `AHardwareBuffer pid[27828]` z1 (game, RGBA_8888, transform **90**/ROT_90), `bbq-adapter#1` z2 (RGBA_8888, transform 90), VRI z3. **EXACT same failure shape as our GL path** (base stays present + ROT_90 game AHB + everything rejected to CLIENT).
+
+**⚠️ CRITICAL CONFOUND — GameHub was running its Wine DESKTOP (windowed), NOT a borderless fullscreen game:** taskbar at bottom + title bar + window chrome; the game content layer is INSET (dst 61,2–1035,1919, not fullscreen). A non-fullscreen scene with competing chrome will be rejected for overlay promotion REGARDLESS of renderer. So this is NOT a clean apples-to-apples vs our fullscreen container, and does NOT cleanly serve as the "GL-origin overlay CAN promote here" reference we wanted.
+
+**What it DOES tell us:**
+1. GameHub's native path ALSO keeps its base SurfaceView present (doesn't vanish it) and ALSO applies ROT_90+scale on the game AHB — so the libwinemu-RE "zero SC-level geometry / standalone surface, no competing base" claim is NOT what this build does in desktop mode. (RE may describe fullscreen-game path or a different code branch.)
+2. It does NOT refute the engineer's diagnosis for OUR GL-vs-Vulkan: that remains a CLEAN A/B (same container, same fullscreen config, same scene — only renderer differs; Vulkan promotes to DEVICE, GL doesn't). The GameHub non-promotion is explained by windowing.
+
+**▶️ To make GameHub a decisive reference: re-run it with a BORDERLESS FULLSCREEN game (no taskbar/title bar).** If fullscreen GameHub promotes → confirms fullscreen+standalone-surface is the recipe (supports fix (a)). If even fullscreen GameHub stays CLIENT on this device → this Adreno750/Android build may be stingy about overlays generally (re-scope expectations). Meanwhile fix (a) is still well-founded on our own Vulkan A/B (the clean fullscreen proof that this geometry promotes on this device).
+⚠️ Left GameHub with Native Rendering+ = Force Enable; may have toggled "RTS Touch Controls" on the Controls page (harmless, cosmetic).
