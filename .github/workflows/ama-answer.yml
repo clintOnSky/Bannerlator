@@ -61,7 +61,9 @@ jobs:
         } >> "$GITHUB_OUTPUT"
 
     - name: Install opencode
-      run: npm install -g opencode@latest 2>&1 | tail -3
+      # The npm package is `opencode-ai` (it installs an `opencode` binary).
+      # `opencode@latest` 404s — that was why the first test produced no answer.
+      run: npm install -g opencode-ai@latest 2>&1 | tail -3
 
     - name: Configure opencode credentials
       id: creds
