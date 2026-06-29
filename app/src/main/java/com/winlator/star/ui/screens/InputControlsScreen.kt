@@ -217,7 +217,11 @@ fun InputControlsScreen() {
                 onDismissRequest = { showDownloadDialog = false },
                 title = { Text("Download Profiles") },
                 text = {
-                    Column {
+                    // Scroll the profile list inside the dialog: the list can be long
+                    // (dozens of .icp files), so without this the bottom rows overflow
+                    // the dialog's bounded height and overlap the Cancel/Download bar —
+                    // worst in landscape where there's even less vertical room.
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
                         items.forEachIndexed { i, item ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
