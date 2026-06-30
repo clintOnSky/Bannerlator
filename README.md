@@ -158,6 +158,47 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 
 ---
 
+## 🎨 Adding your own ReShade effects
+
+Besides the built-in download catalog, you can add **any** ReShade effect yourself by dropping it into a folder. Follow these steps exactly:
+
+**1. Open the ReShade drop-in folder on your device** (create the `ReShade` folder if it isn't there yet):
+
+```
+Android/data/com.winlator.banner/files/ReShade/
+```
+
+> 📁 That path is for the **Standard** build. For the other builds, swap the package name: **PuBG** → `Android/data/com.tencent.ig/files/ReShade/` · **Ludashi** → `Android/data/com.ludashi.benchmark/files/ReShade/`.
+
+**2. Make one folder per effect.** Name the folder whatever you want the effect to be **called in the menu** — for example `MySepia`.
+
+**3. Put the effect's files inside that folder — all in the same place, next to the `.fx`:**
+- the effect's **`.fx`** file (required),
+- any **`.fxh`** files it `#include`s (very common — e.g. `ReShade.fxh`, `ReShadeUI.fxh`),
+- any **image / texture** files the effect uses.
+
+```
+ReShade/
+  MySepia/
+    MySepia.fx          ← the effect (folder name match = used first)
+    ReShade.fxh         ← copy in any .fxh the .fx #includes
+    ReShadeUI.fxh
+    noise.png           ← copy in any textures it uses
+```
+
+**4. Pick it in the app.** Open the app → edit a **container** or a **game shortcut** → **ReShade effect** picker. Your folder now appears in the list — select it.
+
+**5. Use it in-game.** Launch a **DirectX (DXVK / VKD3D) game**, open the in-game drawer → **ReShade tab**, and turn the effect on/off and tune its sliders **live**.
+
+> #### ⚠️ Read this if something doesn't show up or work
+> - **Only colour effects work** — sharpen, colour grading, film grain, CRT, tonemap, vignette, etc. **Depth effects (SSAO, depth-of-field, MXAO) do not work yet.**
+> - ReShade only affects **DirectX games running through DXVK / VKD3D** — it does nothing on OpenGL / WineD3D / older 2D titles.
+> - **Effect not in the list?** Make sure it's in **its own subfolder** and that the subfolder actually contains a `.fx` file (a loose `.fx` sitting directly in `ReShade/` is ignored).
+> - **Effect selected but no change in-game?** Most often a missing `#include` — open the `.fx` in a text editor, find any `#include "Something.fxh"` lines, and make sure each of those `.fxh` files is copied into the **same folder** as the `.fx`. Same for any texture files.
+> - **Can't even find `Android/data`?** Many stock file managers hide it on Android 11+. Use a file manager that can open `Android/data`, or copy the effect folder over from a PC via a USB cable, then drop it in.
+
+---
+
 ## 🎮 Frontends Workaround
 
 Bannerlator does not work by itself on frontends out of the box. See the [frontends workaround guide](https://github.com/star-emu/star/blob/marcescence/marcescence-frontends.md) to get it running.
