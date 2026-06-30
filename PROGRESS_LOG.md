@@ -41,6 +41,12 @@ Agent finishes P1 → push → CI "Any branch compilation." green → **device t
 + wiring intact, NOT byte-identical). SAVE memory + this log + commit BEFORE that device test
 (same-device OOM rule).
 
+**UPDATE (2026-06-30, later):** P1 code DONE + **CI `28434248077` GREEN**. Branch
+`feat/drawer-rebuild-p1` @ `f30db20`. 4 files: AppDrawer.kt + XServerDrawer.kt + new `icon_games.xml`
++ `icon_display.xml`. Wiring confirmed untouched (no handler/structure/order changes). Open question
+for user: keep the additive "NEW" badge on Appearance? **Now AT the device-test gate** — checkpoint
+re-flushed; user drives the install + test. Phase-completion checkpoint will follow once device-proven.
+
 ## 2026-06-29 — bionic-fg: upstream MERGED our compat PR #6; fork synced; branch-landscape mapped for later
 
 **TL;DR:** Our Android wrapper-ICD compatibility fix was **merged into upstream bionic-fg**
