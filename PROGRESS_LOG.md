@@ -51,10 +51,12 @@ only the out-of-game Compose UI and the in-game side drawer + its submenus.
   controller input (legacy `InputControlsView.java`, NOT touched), and all drawer buttons keep their exact
   handlers. Verify gate = on-device functional pass (End Process / Bring to Front / Pause / Exit / Apply &
   Close / ReShade toggle / controller drives game) + before/after color diff. **User drives the device tests.**
-- Committed + pushed branch `feat/theme-centralize-drawer`. CI APK build dispatched (main.yml,
-  **run 28419854007**) 2026-06-30 ~04:15Z — in progress. Watching to completion; will fix on red.
-- **PLAN: user device-tests in the MORNING** (user went to bed 2026-06-30). I babysit CI overnight,
-  fix any build break, leave the green APK + test checklist ready.
+- Committed + pushed branch `feat/theme-centralize-drawer`. CI APK build (main.yml,
+  **run 28419854007**) **✅ GREEN** 2026-06-30 — all 3 flavors built clean (standard/pubg/ludashi-debug
+  ~560 MB each). Color-only diff compiled with NO fixes needed. **APK READY for the morning device test**
+  (download the `standard-debug` artifact from run 28419854007).
+- **PLAN: user device-tests in the MORNING** (user went to bed 2026-06-30). Build is green; no overnight
+  fix was needed. Green APK + test checklist are ready.
 - ON-DEVICE CHECKLIST (user drives, I watch logcat): (1) launch game in a real container → open drawer;
   (2) wiring — Task Mgr End Process / Bring to Front / Pause-Resume / Exit-to-app / Controls Apply&Close /
   ReShade toggle / controller drives game; (3) app side — launch + edit a container/shortcut; (4) color —
