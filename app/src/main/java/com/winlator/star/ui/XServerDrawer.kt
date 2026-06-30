@@ -83,11 +83,13 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import com.winlator.star.R
 import com.winlator.star.reshade.ReshadeManager
+import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 
 // Accent colors route to the live MaterialTheme.colorScheme (primary/surface) so the drawer
-// follows the user's theme preset / custom accent. The constants below have no exact scheme
-// slot under the default AMOLED preset, so they stay local to keep the default look identical.
+// follows the user's theme preset / custom accent. The dim accent (low-emphasis fills/borders/
+// tracks) routes to LocalAccentDim.current — AMOLED maps that to the exact legacy #002277 so the
+// default look stays identical, while other presets/custom accents recolor it.
 // PureBlack is kept only for spots that need a true literal black that must NOT theme (the
 // color-picker knob outline); panel/rail backgrounds route to colorScheme.surface instead.
 private val PureBlack = Color(0xFF000000)
@@ -96,9 +98,6 @@ private val DimWhite = Color(0xFFE8E8E8)
 private val MutedWhite = Color(0xFF999999)
 private val ToggleTrackOff = Color(0xFF333333)
 private val ToggleThumbOff = Color(0xFF666666)
-// Dim accent tint (#002277). No primary-derived value or scheme slot equals this exactly under
-// AMOLED, so it stays local to avoid drifting the default look (see report note on PrimaryDim).
-private val PrimaryDim = Color(0xFF002277)
 
 fun setupComposeView(view: ComposeView) {
     view.setContent {
@@ -213,8 +212,9 @@ private fun handleTabClick(tab: TabType, state: XServerDrawerState) {
 @Composable
 private fun TabIconButton(iconRes: Int, isSelected: Boolean, onClick: () -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
     val bgBrush = if (isSelected)
-        Brush.verticalGradient(listOf(PrimaryDim, accent.copy(alpha = 0.3f)))
+        Brush.verticalGradient(listOf(accentDim, accent.copy(alpha = 0.3f)))
     else
         Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
 
@@ -253,8 +253,9 @@ private fun TabIconButton(iconRes: Int, isSelected: Boolean, onClick: () -> Unit
 @Composable
 private fun FpsTabButton(isSelected: Boolean, onClick: () -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
     val bgBrush = if (isSelected)
-        Brush.verticalGradient(listOf(PrimaryDim, accent.copy(alpha = 0.3f)))
+        Brush.verticalGradient(listOf(accentDim, accent.copy(alpha = 0.3f)))
     else
         Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
 
@@ -319,6 +320,7 @@ private fun SectionHeader(title: String) {
 @Composable
 private fun ToggleRow(label: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -340,7 +342,7 @@ private fun ToggleRow(label: String, checked: Boolean, enabled: Boolean = true, 
             enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = accent,
-                checkedTrackColor = PrimaryDim,
+                checkedTrackColor = accentDim,
                 uncheckedThumbColor = ToggleThumbOff,
                 uncheckedTrackColor = ToggleTrackOff,
             )
@@ -403,12 +405,13 @@ private fun LabeledSlider(
 
 @Composable
 private fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val accentDim = LocalAccentDim.current
     Button(
         onClick = onClick,
         modifier = modifier.fillMaxWidth().height(42.dp),
         shape = RoundedCornerShape(10.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = PrimaryDim,
+            containerColor = accentDim,
             contentColor = Color.White
         )
     ) {
@@ -774,6 +777,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
 @Composable
 private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
     val options = listOf(0 to "Off", 2 to "2×", 3 to "3×", 4 to "4×")
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -790,7 +794,7 @@ private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
                     .background(if (isSel) accent else Color.Black)
                     .border(
                         width = 1.dp,
-                        color = if (isSel) accent else PrimaryDim,
+                        color = if (isSel) accent else accentDim,
                         shape = RoundedCornerShape(8.dp)
                     )
                     .clickable { onSelect(mult) }
@@ -1123,6 +1127,7 @@ private fun DebandControls(enabled: Boolean = true) {
 @Composable
 private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
     val options = listOf(
         0 to "None", 1 to "Linear", 2 to "Nearest",
         3 to "SGSR", 4 to "FSR", 5 to "FSR (Fit)", 6 to "Sharpen", 7 to "NIS"
@@ -1143,7 +1148,7 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
                             .background(if (isSel && enabled) accent else Color.Black)
                             .border(
                                 width = 1.dp,
-                                color = if (isSel && enabled) accent else PrimaryDim,
+                                color = if (isSel && enabled) accent else accentDim,
                                 shape = RoundedCornerShape(8.dp)
                             )
                             .clickable(enabled = enabled) { onSelect(mode) }
@@ -1479,6 +1484,7 @@ private fun HudContent(state: XServerDrawerState) {
 
 @Composable
 private fun HudChipRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val accentDim = LocalAccentDim.current
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = DimWhite)
         Spacer(Modifier.height(4.dp))
@@ -1490,7 +1496,7 @@ private fun HudChipRow(label: String, options: List<String>, selected: Int, onSe
                         .weight(1f)
                         .padding(end = if (idx < options.lastIndex) 6.dp else 0.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (sel) PrimaryDim else DarkSurface)
+                        .background(if (sel) accentDim else DarkSurface)
                         .clickable { onSelect(idx) }
                         .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center

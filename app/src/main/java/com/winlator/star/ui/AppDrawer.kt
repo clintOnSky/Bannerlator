@@ -68,7 +68,7 @@ private fun iconFor(screen: Screen): Int = when (screen) {
     Screen.Saves         -> R.drawable.icon_save
     Screen.FileManager   -> R.drawable.icon_menu_file_manager
     Screen.Settings      -> R.drawable.icon_settings
-    Screen.Appearance    -> R.drawable.icon_settings
+    Screen.Appearance    -> R.drawable.icon_palette
     else                 -> R.drawable.icon_container
 }
 
@@ -105,6 +105,7 @@ fun AppDrawerContent(
         DrawerItem(Screen.Containers,    currentRoute, onNavigate)
         DrawerItem(Screen.FileManager,   currentRoute, onNavigate)
         DrawerItem(Screen.Settings,      currentRoute, onNavigate)
+        DrawerItem(Screen.Appearance,    currentRoute, onNavigate)
 
         HorizontalDivider(color = GlowBlue, modifier = Modifier.padding(start = 20.dp, top = 6.dp, end = 20.dp, bottom = 6.dp))
 

@@ -3,6 +3,7 @@ package com.winlator.star.ui.theme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 
 data class ThemePreset(
     val name: String,
@@ -10,6 +11,11 @@ data class ThemePreset(
     val surface: Color,
     val surfaceVariant: Color,
     val primary: Color,
+    // Dim accent used for low-emphasis fills/borders/tracks (selected-tab gradient base,
+    // unselected chip outlines, switch-on track, accent-button bg). Defaults to a darkened
+    // primary so it follows the theme; AMOLED overrides it to the exact legacy #002277 to
+    // keep the default look byte-identical.
+    val accentDim: Color = lerp(primary, Color(0xFF000000), 0.55f),
     val onSurface: Color = Color(0xFFE0E0E0),
     val onSurfaceVariant: Color = Color(0xFFAAAAAA),
     val onBackground: Color = Color(0xFFFFFFFF),
@@ -70,6 +76,7 @@ val themePresets: List<ThemePreset> = listOf(
         surface       = Color(0xFF000000),
         surfaceVariant= Color(0xFF050505),
         primary       = Color(0xFF0055FF),
+        accentDim     = Color(0xFF002277),  // exact legacy value → default stays byte-identical
         onSurface     = Color(0xFFEEEEEE),
         divider       = Color(0xFF111111),
     ),
