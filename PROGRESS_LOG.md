@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-06-30 — UI rebuild MERGED to main + 9 new theme presets (artifacts build)
+
+**The umbrella hold is collapsed.** User decided the rebuild is feature-complete enough to merge and apply small fixes forward, so `feat/ui-rebuild` was merged into `main` and a fresh batch of opt-in themes added.
+
+- **Merge:** `feat/ui-rebuild` → `main` = merge commit `35c8a28`. Only `PROGRESS_LOG.md` conflicted (docs); resolved as a union. Code tree verified identical to the umbrella tip (no code conflicts). Brings in: drawers rebuild (P1), theme centralization, drawer dialogs (P2), app-screen colour sweep (P3), on-screen controls + per-profile custom control colour (P4a), legacy-XML accent (P4b), TM-cards, External Controller Bindings → Compose, and File Manager Favorites.
+- **9 new theme presets** = commit `5d75439`: Midnight Cobalt, Phosphor, Carbon & Ember, Amethyst, Crimson, Synthwave, Royal Gold, Frost, Monochrome. All opt-in; **AMOLED stays the default**. Inserted *before* "Custom" in `themePresets` so existing saved preset indices 0..6 are unaffected; `AppThemeState.init` adds a one-time `preset_schema_v2` migration that remaps anyone on the old Custom slot (index 7) to the new `CUSTOM_PRESET_INDEX`. `onPrimary` forced dark on light/bright accents (phosphor/gold/frost/mono) for legible on-accent text. AppearanceScreen renders them automatically (`themePresets.chunked(4)`).
+- **Build:** pushed to `origin/main` after a brief github outage; artifacts-only build (workflow_dispatch `main.yml`) run `28470653013` in progress. **No release, no version bump** (hard rule).
+- ▶️ **GATE before any release:** consolidated on-device test of the whole merged stack — favorites, bindings-Compose, TM-cards, P4b, custom-control-colour sub-items (per-game persist/relaunch, out-of-game editor, back-compat), and the 9 new presets (each recolours app + drawer; AMOLED default unchanged; on-accent text legible). Nothing post-P4a is device-proven yet.
+
+---
+
 ## 2026-06-30 — File Manager FAVORITES — CODE DONE + CI ✅GREEN (preview signed off)
 
 **Status:** implemented on `feat/ui-rebuild` — commits `bd57830` (feature) + `34247eb` (Back closes Favorites first) + `c06a397` (toasts on add/remove). CI `28467705193` ✅GREEN (pre-toast); toast commit CI `28469094380` ✅GREEN (tip `c06a397`). NOT merged (umbrella hold). Decisions: both pin entry points + global/absolute-path scope. ▶️ At device-test gate.
