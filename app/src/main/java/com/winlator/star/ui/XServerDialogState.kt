@@ -185,6 +185,42 @@ object XServerDialogState {
     @JvmField var onVulkanScreenEffectsApply: VulkanScreenEffectsCallback? = null
 
     // -------------------------------------------------------------------------
+    // ReShade (vkBasalt) — in-game section under Graphics. Mirrors Frame Generation:
+    // on/off + a slider per uniform reflected from the selected .fx. The effect is chosen
+    // pre-launch (in the shortcut/container editor); this section tunes the loaded effect.
+    // Supported only on DXVK/VKD3D (Vulkan) games — the drawer greys/hides the section
+    // otherwise (mirrors how SGSR/HDR are gated). Live-apply rides a SINGLE pluggable seam
+    // (onReshadeApply -> applyReshadeLive) so the X11-inject / native config-watch
+    // workstream can wire true liveness in one place; until then changes apply on relaunch.
+    // -------------------------------------------------------------------------
+    private val _reshadeSupported = MutableStateFlow(false)
+    val reshadeSupported: StateFlow<Boolean> = _reshadeSupported
+    fun setReshadeSupported(v: Boolean) { _reshadeSupported.value = v }
+
+    private val _reshadeEffectName = MutableStateFlow("None")
+    val reshadeEffectName: StateFlow<String> = _reshadeEffectName
+    fun setReshadeEffectName(v: String) { _reshadeEffectName.value = v }
+
+    private val _reshadeEnabled = MutableStateFlow(false)
+    val reshadeEnabled: StateFlow<Boolean> = _reshadeEnabled
+    fun setReshadeEnabled(v: Boolean) { _reshadeEnabled.value = v }
+
+    // Reflected params of the loaded effect + their current values. The params list is set once
+    // at launch (seeded after the container is assigned); values mutate as sliders move.
+    private val _reshadeParams = MutableStateFlow<List<com.winlator.star.reshade.ReshadeManager.ReshadeParam>>(emptyList())
+    val reshadeParams: StateFlow<List<com.winlator.star.reshade.ReshadeManager.ReshadeParam>> = _reshadeParams
+    fun setReshadeParams(v: List<com.winlator.star.reshade.ReshadeManager.ReshadeParam>) { _reshadeParams.value = v }
+
+    private val _reshadeValues = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val reshadeValues: StateFlow<Map<String, Float>> = _reshadeValues
+    fun setReshadeValues(v: Map<String, Float>) { _reshadeValues.value = v }
+
+    // enabled + the full current value map. The activity rewrites the conf (and, once the live
+    // mechanism lands, hot-applies) in applyReshadeLive.
+    fun interface ReshadeApplyCallback { fun invoke(enabled: Boolean, values: Map<String, Float>) }
+    @JvmField var onReshadeApply: ReshadeApplyCallback? = null
+
+    // -------------------------------------------------------------------------
     // Vibration dialog
     // -------------------------------------------------------------------------
     private val _vibrationSlots = MutableStateFlow<List<Pair<String, Boolean>>>(emptyList())
@@ -405,6 +441,11 @@ object XServerDialogState {
         _vkToon.value          = false
         _vkCrt.value           = false
         _vkNtsc.value          = false
+        _reshadeSupported.value = false
+        _reshadeEffectName.value = "None"
+        _reshadeEnabled.value  = false
+        _reshadeParams.value   = emptyList()
+        _reshadeValues.value   = emptyMap()
         _vibrationSlots.value  = emptyList()
         _logLines.value        = emptyList()
         _logPaused.value       = false
@@ -435,6 +476,7 @@ object XServerDialogState {
         onCasApply = null; onHdrApply = null; onUpscaleSharpnessApply = null
         onDebandApply = null
         onVulkanScreenEffectsApply = null
+        onReshadeApply = null
         onVibrationSlotChanged = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null

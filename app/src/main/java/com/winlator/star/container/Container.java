@@ -449,6 +449,25 @@ public class Container {
         putExtra("manualRefreshRate", String.valueOf(rate));
     }
 
+    // --- ReShade effect (vkBasalt drop-in), per-container default; the per-game shortcut can
+    // override both keys via its extras (resolvedReshade* in XServerDisplayActivity). "None" / empty
+    // = no effect. reshadeParams is a JSON object of {uniformName: value} overriding the .fx defaults.
+    public String getReshadeEffect() {
+        return getExtra("reshadeEffect", "None");
+    }
+
+    public void setReshadeEffect(String effect) {
+        putExtra("reshadeEffect", (effect == null || effect.isEmpty()) ? "None" : effect);
+    }
+
+    public String getReshadeParams() {
+        return getExtra("reshadeParams", "");
+    }
+
+    public void setReshadeParams(String json) {
+        putExtra("reshadeParams", (json == null || json.isEmpty()) ? null : json);
+    }
+
     public String getWineVersion() {
         return wineVersion;
     }

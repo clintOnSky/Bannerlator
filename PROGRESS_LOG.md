@@ -2,6 +2,107 @@
 
 ---
 
+## 2026-06-29 (cont.) — STEP 3 ReShade: P2 DEVICE-PROVEN + typed controls/tab/reset + on-demand download catalog LIVE
+
+**TL;DR:** The in-game ReShade feature is now fully device-proven (P2 done). Added typed UI controls,
+a dedicated ReShade drawer tab, and a Reset button. Switched the effect library from APK-bundled to
+**on-demand download** — published a 100-effect catalog (`reshade.json` + `reshade-v1` release) on
+`The412Banner/winlator-contents`; the app-side download UI is building.
+
+### P2 device-proven (in-game ReShade)
+- Live `.fx` compile, live on/off, and live per-uniform sliders all confirmed on hardware (Technicolor,
+  ArcaneBloom over The Saboteur). The `formatUniformLine` `<effect>_<uniform>` key syntax is correct.
+
+### `feat/reshade-typed-controls` (off `fix/reshade-live-toggle`) — CI `28411754406` GREEN
+- `ReshadeManager.ParamType += COMBO, COLOR`; `reflectParams` parses `floatN`/`intN` + `ui_items`
+  (`\0`-split), and now **skips `source=`-annotated uniforms** (engine semantics like timer/frametime —
+  ArcaneBloom's `uTime`/`uFrameTime` were leaking in as dead sliders).
+- Drawer renders by type: bool→toggle, combo/radio→dropdown, color→HSV picker (collapsed by default,
+  tap swatch to expand), slider/drag→slider. Value transport stays float-based; color = `<u>_0.._N` keys.
+- New **dedicated ReShade tab** (`TabType.RESHADE`, `icon_screen_effect`) — pulled the ReShade block out
+  of the Graphics tab. **Reset** button re-seeds every param to its `.fx` default via `onReshadeApply`.
+- Pre-launch editors (container + shortcut) render the same typed controls (color = R/G/B sliders there).
+- Device-confirmed: toggle ("Use Limits"), dropdown ("Debug Options"), color picker, collapse, Reset.
+
+### On-demand download catalog (replaces APK bundling)
+- Decision: do NOT ship `.fx` in the APK. Host on `The412Banner/winlator-contents`; the pre-launch effect
+  picker shows the full catalog GREYED, each row downloads-and-fills-in on tap.
+- **Published + LIVE:** `reshade.json` on repo `main` (100 effects) + 100 per-effect `.tzst` as assets on
+  release **`reshade-v1`**. License-safe set only (crosire/prod80/luluco250/fubax; AstrayFX excluded for
+  license ambiguity, qUINT excluded). Built by `scratchpad/reshade_catalog.py` (include+texture closure;
+  prod80 `PD80_NN_` prefixes stripped for clean ids; category-tagged).
+- Schema: `{schemaVersion,category,release,mirrorBase,count,effects[{id,name,description,category,author,
+  license,url,file_size,file_checksum(MD5),version}]}`. `id` = drop-in folder name; tzst extracts into
+  `getExternalFilesDir/ReShade/<id>/`.
+- App side building on `feat/reshade-download-catalog` (off `feat/reshade-typed-controls`).
+
+### Credits (for the next stable's release notes)
+- vkBasalt engine: **DadSchoorse** (original, our patched .so builds from this) + **Pipetto-crypto**
+  (Winlator integration, commit `67b6dad`) + **StevenMXZ** (Winlator-Ludashi). Shader authors:
+  crosire/ReShade, prod80, luluco250, Fubaxiusz.
+
+### Still ahead
+- Codegen sweep (verify which of the 100 actually compile on vkBasalt → prune/flag catalog).
+- Tier-1 hardening: existing-container layer heal, GPU/Mali coverage, Vulkan-only boundary.
+- Merge the ReShade stack to main + cut the stable (with credits). Depth effects = STEP 4.
+
+---
+
+## 2026-06-29 — ▶️ RESUME HERE: STEP 3 ReShade effects — BUILT end-to-end, one device test from done
+
+**TL;DR:** In-game ReShade `.fx` effects via the bundled vkBasalt layer. App feature + a patched live-reload
+vkBasalt layer are BOTH built and CI-green; integrated build is compiling. **Only the on-hardware device test
+remains.** Design doc: `docs/RESHADE_STEP3_PLAN.md`.
+
+### Branches (all pushed to origin)
+- `feat/reshade-step3` — app-side feature (5 commits). CI `28401038692` ✅ GREEN.
+- `feat/reshade-vkbasalt-build` — patched libvkbasalt.so source/patch/workflow. CI `28401364441` ✅ GREEN.
+- **`feat/reshade-integrated`** — `step3` ⊕ `vkbasalt-build` + integration commit (patched .so repacked into
+  `extra_libs.tzst` + uniform-key fix). **THIS is the branch to install/test.** Combined CI `28402115564`
+  (workflow "CI Build (artifacts only)") — was IN PROGRESS at handoff; check it on resume.
+
+### What was proven / built this session
+1. **Spike DEVICE-PROVEN:** hardcoded sepia `.fx` compiled on-device (vkBasalt reshadefx→SPIR-V→Turnip) and
+   applied to a live DXVK game (The Saboteur) → screen went sepia. ReShade `.fx` on Adreno = real. Blockers
+   #1 (language) + #2 (Adreno compile) empirically dead. (Depth effects still STEP 4.)
+2. **Two infra bugs found + fixed:** (a) `extra_libs.tzst` (carries libvkbasalt.so) only extracted on container
+   `firstTimeBoot` → existing containers never got the layer (silent no-op). Fixed: extract whenever the .so is
+   absent. (b) the SHIPPED libvkbasalt.so has its key-detection compiled out (`isKeyPressedX11`→return false) +
+   no uniform-override path → its HOME toggle is dead for ALL inputs and it can't do live sliders. ⇒ any live
+   control REQUIRES a rebuilt layer (the X11-Home-inject "free toggle" idea is DEAD — dropped).
+3. **App-side Phase 1** (android-app-engineer): `reshade/ReshadeManager.java` (drop-in folder scan +
+   `.fx` ui_* param regex reflection, scalar float/int/bool); `Container.java` persists `reshadeEffect`/
+   `reshadeParams`; `XServerDisplayActivity.java` extraction-gate fix + `writeVkBasaltConfig()` (merged with CAS
+   into one `effects = <effect>:cas` chain) + `applyReshadeLive()` seam; in-game drawer ReShade section
+   (`XServerDialogState.kt`/`XServerDrawer.kt`); effect pickers in shortcut + container editors.
+   Drop-in folder = `getExternalFilesDir(null)/ReShade/` (one subfolder per effect; copied into guest HOME
+   `.config/vkBasalt/effects/<name>/` at launch for host-absolute paths). Gated to DXVK/VKD3D.
+4. **Patched vkBasalt** (graphics-vulkan-engineer): `patches/vkbasalt-reshade-livereload.patch` vs upstream
+   `DadSchoorse/vkBasalt@4f97f09` (submodule `app/src/main/cpp/vkbasalt`), built via new `build-vkbasalt.yml`
+   (meson Android cross, NDK r27c, arm64-v8a/android-24, X11-free). **Part A** = live on/off (Config remembers
+   opened path; present-hook mtime-watch re-reads conf → flips `presentEffect` from `enableOnLaunch`; lsfg-mirror,
+   no swapchain recreate). **Part B** = live sliders (codegen uniforms-to-spec-constants=FALSE → ui_* uniforms in
+   UBO; new `GenericUniform` + `ReshadeEffect::updateUniformsFromConfig()` overrides from conf key
+   `"<effect>_<uniform>"` → next-frame memcpy, no recompile). CI-green + binary-symbol-verified.
+5. **Integration:** patched .so (stripped 1.85MB) repacked into `extra_libs.tzst`; `formatUniformLine()` aligned
+   to emit `<effectKey>_<uniform>` to match the patch's read key.
+
+### ▶️ NEXT (on resume, when home / Wi-Fi back)
+1. Check combined CI `28402115564` (branch `feat/reshade-integrated`); if green, grab the APK artifact.
+2. **DEVICE TEST on The Saboteur (DXVK)** — the unproven gate (all green/binary-verified, Part A+B untested on
+   hardware): install integrated APK → use a **FRESH container** (old `xuser-4` has `libvkbasalt.so.disabled`
+   from the spike sepia-cleanup; extraction-heal/new container installs the patched .so) → pick a ReShade effect
+   → verify (a) effect renders CORRECTLY [Part B UBO change didn't break render], (b) drawer ReShade on/off
+   toggles LIVE [Part A], (c) sliders move the image LIVE [Part B + key syntax]. ⚠️ uniform-override key form is
+   the most likely thing to need a tweak — centralized in `formatUniformLine()`.
+3. If green on device → tidy (strip note, drop the throwaway `spike/vkbasalt-reshade`), then decide merge to main.
+   Live SLIDERS depend entirely on the patched .so working; if Part B misbehaves on device, on/off (Part A) is the
+   lower-risk fallback to ship first.
+
+⚠️ Memory file `project_bannerlator_step3_shader_loader_reshade` has the full detail + every commit/run id.
+
+---
+
 ## 2026-06-28 (s4) — ▶️ RESUME / CURRENT STATUS: VRR + manual picker built & verified; pacing tweak pending
 
 **Where things stand on the graphics roadmap:**
