@@ -2,6 +2,19 @@
 
 ---
 
+## 2026-06-30 — P4 device-test fixes: controls-editor readability + binding text never invisible (CODE DONE + CI building)
+
+**TL;DR:** Two bugs surfaced in device testing of P4b/custom-color, both fixed. Commit `589566c` on
+`feat/ui-rebuild`, CI `28461375330` building, at device gate. Not merged (umbrella hold).
+- **Controls editor** rendered the on-screen buttons/labels in the per-profile in-game *custom* accent
+  (a dark custom colour → unreadable, and it ignored the app theme). Fix: `resolveBaseAccentArgb()` uses
+  the app theme accent in `editMode` (the editor); in-game still honours the per-profile custom colour.
+- **Binding-spinner text** (themed in P4b) could go invisible on the screen's black background under a
+  dark accent — the original black-on-black bug. Fix: `AccentArrayAdapter` applies a luminance floor
+  (0.18) → accent when legible, white when too dark; default blue + presets keep their colour.
+
+---
+
 ## 2026-06-30 — UI rebuild Phase 4b: legacy XML surfaces follow runtime accent (CODE DONE + reviewed + CI building)
 
 **TL;DR:** The remaining LIVE legacy `@color/colorPrimary` surfaces now follow the runtime theme accent
