@@ -137,7 +137,7 @@ private fun ReshadeCatalogSheet(
     val rows = remember(catalog, installed) {
         val catIds = catalog.map { it.id }.toSet()
         val extras = installed.filter { it !in catIds }
-            .map { ReshadeCatalogEntry(it, it, "", "Installed", "", "", "", 0L, "", "", "$it.fx") }
+            .map { ReshadeCatalogEntry(it, it, "", "Installed", "", "", "", 0L, "", 1) }
         (catalog + extras).sortedWith(compareBy({ it.category }, { it.name.lowercase() }))
     }
 
