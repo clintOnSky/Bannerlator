@@ -74,6 +74,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ComposeView
@@ -85,6 +86,7 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import com.winlator.star.R
 import com.winlator.star.reshade.ReshadeManager
+import com.winlator.star.ui.components.ColorPicker
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 
@@ -1535,6 +1537,8 @@ private fun ControlsContent(state: XServerDrawerState) {
     val isRelativeMouse by state.isRelativeMouseMovement.collectAsState()
     val isMouseDisabled by state.isMouseDisabled.collectAsState()
     val initOverlayOpacity by state.overlayOpacity.collectAsState()
+    val controlsFollowTheme by state.controlsFollowTheme.collectAsState()
+    val initControlsAccent by state.controlsAccentColor.collectAsState()
 
     SectionHeader("Controls")
 
@@ -1597,6 +1601,26 @@ private fun ControlsContent(state: XServerDrawerState) {
         },
         format = { "${(it * 100).toInt()}%" },
     )
+
+    // On-screen controls accent — per-profile override. Follow the app theme (default) or pick a
+    // custom accent for the active profile; idle controls stay white, pressed auto-brightens.
+    Spacer(Modifier.height(4.dp))
+    ToggleRow("Follow app theme", controlsFollowTheme) {
+        state.setControlsFollowTheme(it)
+        state.onControlsColorChange?.run()
+    }
+    if (!controlsFollowTheme) {
+        Spacer(Modifier.height(8.dp))
+        Text("Controls Accent", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Spacer(Modifier.height(8.dp))
+        ColorPicker(
+            initialColor = Color(initControlsAccent),
+            onColorChanged = {
+                state.setControlsAccentColor(it.toArgb())
+                state.onControlsColorChange?.run()
+            }
+        )
+    }
 
     Spacer(Modifier.height(8.dp))
 

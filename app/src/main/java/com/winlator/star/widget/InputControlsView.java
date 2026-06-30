@@ -343,17 +343,25 @@ public class InputControlsView extends View {
         return Color.argb((int)(overlayOpacity * 255), 255, 255, 255);
     }
 
+    // Base accent for the on-screen controls: the active profile's custom accent when it opted in,
+    // otherwise the live app theme accent. The accent getters below all derive from this so a
+    // per-profile override (set in the editor / in-game drawer) takes precedence over the theme.
+    private int resolveBaseAccentArgb() {
+        if (profile != null && profile.isCustomAccentEnabled()) return profile.getCustomAccentColor();
+        return AppThemeState.getCurrentAccentArgb();
+    }
+
     public int getSecondaryColor() {
-        int accent = AppThemeState.getCurrentAccentArgb();
+        int accent = resolveBaseAccentArgb();
         return Color.argb((int)(overlayOpacity * 255), Color.red(accent), Color.green(accent), Color.blue(accent));
     }
 
     public int getAccentColor() {
-        return 0xff000000 | (AppThemeState.getCurrentAccentArgb() & 0x00ffffff);
+        return 0xff000000 | (resolveBaseAccentArgb() & 0x00ffffff);
     }
 
     public int getAccentBrightColor() {
-        int accent = AppThemeState.getCurrentAccentArgb();
+        int accent = resolveBaseAccentArgb();
         int r = lerpToWhite(Color.red(accent), 0.55f);
         int g = lerpToWhite(Color.green(accent), 0.55f);
         int b = lerpToWhite(Color.blue(accent), 0.55f);
