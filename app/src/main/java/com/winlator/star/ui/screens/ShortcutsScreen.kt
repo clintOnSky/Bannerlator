@@ -12,11 +12,14 @@ import android.graphics.drawable.Icon
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -335,7 +338,6 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onExport = itemExport,
                                     onProperties = itemProperties,
                                 )
-                                Divider(color = DividerColor)
                             }
                         }
                     }
@@ -630,13 +632,24 @@ private fun ShortcutItemLayoutL(
 
     val subtitle = listOf(container?.name ?: "", resolution).filter { it.isNotEmpty() }.joinToString(" · ")
 
-    Row(
+    // Floating card to match the Containers list (rounded surfaceVariant panel + outline
+    // border + side margins) instead of a flat edge-to-edge row.
+    Card(
+        onClick = onRun,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+      Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceColor)
-            .clickable(onClick = onRun)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(start = 12.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
     ) {
         // 3:4 poster cover (same as layout A); fall back to a glyph tile.
         Box(
@@ -699,6 +712,7 @@ private fun ShortcutItemLayoutL(
             onExport = onExport,
             onProperties = onProperties,
         )
+      }
     }
 }
 
