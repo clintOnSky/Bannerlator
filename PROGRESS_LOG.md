@@ -2,6 +2,68 @@
 
 ---
 
+## 2026-06-30 — Theme + Drawer rebuild: Phase 3 CODE DONE + CI GREEN (at device gate); Phase 2 DEVICE-PROVEN
+
+**TL;DR:** Catch-up checkpoint for Phases 2 & 3 of the UI rebuild. All work lives on the
+umbrella branch **`feat/ui-rebuild`** (no merge to main until the whole rebuild is done).
+**Phase 2 (drawer dialogs) is device-proven**; **Phase 3 (app-screen colour sweep) is code-complete
+and CI-green, now at the device-test gate.**
+
+### Phase 2 — drawer dialogs — ✅ DEVICE-PROVEN (2026-06-30, 2nd attempt)
+Commit `33eeb6a` on `feat/ui-rebuild`, CI `28440636066` green. Driven on the ludashi build
+(`com.ludashi.benchmark` code 34) via the root bridge, Sunset preset, Vulkan container. All four
+checklist items passed, no regressions:
+- **Recolor under preset** — in-game drawer, Task Manager tab, CPU/Memory sections, and the New
+  Task dialog all themed orange under Sunset; selected rail tab = orange pill.
+- **Task Manager MoreVert** — "Bring to Front" (FlipToFront icon, neutral) + "End Process"
+  (X/Close icon, red error-tint, destructive); New Task… (accent) + Clear footer themed.
+- **🎉 Group B win — New Task dialog VISIBLE on Vulkan AND works** — the old native
+  `ContentDialog.prompt` was invisible on Vulkan/ASR; converted to a Compose `AlertDialog`
+  (title, text field defaulting `taskmgr.exe`, Cancel/OK). Tapping OK → `winHandler.exec`
+  launched the real Windows Task Manager (Running on guest). End-to-end proven.
+- **Wiring intact** — dropdown opens, New Task exec spawns a process, Exit → clean Shutdown
+  teardown → clean return to Games. No crash/hang.
+- Capture note: a persistent detached `logcat` must write to `/data/local/tmp` (not `/sdcard`,
+  which is namespace-isolated under magisk su) to survive the bridge connection dropping.
+
+### Phase 3 — app-screen colour sweep — ✅ CODE DONE + CI GREEN, ▶️ AT DEVICE GATE
+Two commits on `feat/ui-rebuild`, both CI-green (workflow_dispatch `main.yml`):
+- **`8a97185` "phase 3" — the sweep** (CI `28447905004` ✅): ~190 hardcoded `Color(0x…)` sites
+  across 13 in-scope Compose screens rerouted onto `MaterialTheme.colorScheme.*` /
+  `LocalAccentDim.current`. Stores (`store/*`) and theme-definition files
+  (Color/ThemePreset/AppThemeState/Theme) left untouched; colour-only.
+  - **Headline fix:** `ShortcutsScreen` FAB(+), grid-tile gradient, scrape icon → `primary`;
+    `SpecCardComponents` renderer + DXVK chips → `primary` (so they follow the accent).
+  - **Kept semantic colours:** green success `4CAF50`, `installedBlue 4FC3F7`, amber `FFC107`,
+    error reds, untrusted salmon, per-tech identity dots, contrast white/black.
+- **`b20a58d` "phase 3b" — elevated surfaces (user-approved fix)** (CI `28449013883` ✅): phase-3
+  had no token matching the bespoke navy card surfaces / dialog greys → they flattened to
+  near-black at default. Fixed by adding Material3's built-in `surfaceContainer` family slots to
+  `ThemePreset` (data-class fields + set in `toColorScheme`/`toLightColorScheme`; derived defaults
+  `lerp(surface, onSurface, 0.05/0.09/0.14)` so every preset gets a recolouring elevation ramp).
+  - **AMOLED override values:** `surfaceContainer=0xFF1A1A2E`, `surfaceContainerHigh=0xFF2A2A38`,
+    `surfaceContainerHighest=0xFF38383F` (restores blue-on-black card depth).
+  - Repointed Settings / InputControls / FileManager navy cards & buttons by original depth order,
+    and themed the leftover dialog greys (`2A2A2A`→High, `333333` tracks→Highest, body text
+    `CCCCCC/E0E0E0`→onSurface, `AAAAAA/B0BEC5`→onSurfaceVariant). `Theme.kt` DefaultColorScheme
+    confirmed dead/unused.
+
+### Two sanctioned default-look changes to eyeball on device
+(User OK'd default changes for this rebuild.) (1) renderer/DXVK chips are now accent-blue at the
+AMOLED default instead of teal/green — the requested "chips follow the theme"; (2) Settings/Input/
+FileManager card depth — flattened by 3a, restored by 3b's elevated tokens → confirm it reads
+~like the original at default and recolours under a preset.
+
+### ▶️ Next
+Device-test Phase 3 on the ludashi build (user installs the `ludashi-debug` artifact from CI run
+`28449013883`): (a) AMOLED default — Settings/dialogs have raised card depth, nothing broken;
+(b) apply Sunset → Games FAB + renderer/DXVK chips + Settings + InputControls + FileManager +
+dialogs all recolour; (c) wiring intact; (d) green success buttons stayed green. Then Phase 4
+(native/legacy via `getCurrentAccentArgb`) and Phase 5 (optional presets). Merge `feat/ui-rebuild`
+→ main only when ALL phases are device-proven.
+
+---
+
 ## 2026-06-30 — Theme + Drawer rebuild: Phase 1 DEVICE-PROVEN (all checklist items pass)
 
 **TL;DR:** Phase 1 (themed icons + button restyle of BOTH drawers) is now **device-proven**.
