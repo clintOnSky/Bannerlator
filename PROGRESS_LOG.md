@@ -2,6 +2,30 @@
 
 ---
 
+## 2026-06-30 — UI rebuild Phase 4b: legacy XML surfaces follow runtime accent (CODE DONE + reviewed + CI building)
+
+**TL;DR:** The remaining LIVE legacy `@color/colorPrimary` surfaces now follow the runtime theme accent
+(fed at inflation via `AppThemeState.getCurrentAccentArgb()`); `colors.xml` keeps #0055FF as the static
+fallback so the AMOLED default is unchanged. Dead/Compose-replaced layouts skipped. Commit `7ed3f10` on
+`feat/ui-rebuild`, CI `28459471318` building, **at device gate**. Not merged (umbrella hold).
+
+### What changed
+- New `widget/AccentArrayAdapter` — re-applies the runtime accent to the controller-binding spinner item
+  + dropdown TextViews (both binding-spinner activities point at it; they didn't share an adapter before).
+- `ExternalControllerBindingsActivity`: toolbar header background → accent; type + binding spinners →
+  AccentArrayAdapter (dropdown view resource preserved).
+- `ControlsEditorActivity`: binding spinners → AccentArrayAdapter.
+- `ContentDialog`: title icon tint + title text + bottom-bar label → accent; body `TVMessage` untouched.
+- `InputControlsFragment` (+ layout id): the "External Controllers" section header → accent at runtime.
+- Trash icon left as-is (styled `colorPrimaryDark` on a raster PNG, not `colorPrimary`).
+
+### Device-test gate (pending)
+Under a non-default preset: controller-bindings screen header bar + binding-spinner text recolor; native
+ContentDialog prompts show accent title/icon/label (body stays readable); Input Controls "External
+Controllers" header recolors. At AMOLED default everything stays #0055FF (unchanged).
+
+---
+
 ## 2026-06-30 — Per-profile custom accent color for on-screen controls — ✅ CORE DEVICE-PROVEN
 
 Commit `f6ea902` on `feat/ui-rebuild`, CI `28455766095` green. Device-proven (core) via user screenshot:
