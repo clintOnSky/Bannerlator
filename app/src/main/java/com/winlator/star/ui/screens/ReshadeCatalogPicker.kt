@@ -16,13 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ColorScheme
@@ -61,18 +60,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Pre-launch ReShade effect picker (used by the container editor + per-game shortcut editor).
- * Shows the current selection + a "Browse / download" button that opens a catalog sheet listing
- * EVERY effect from reshade.json: already-installed effects are selectable; not-yet-downloaded ones
- * are greyed with a download affordance. Tapping a greyed row downloads its archive, extracts it
- * into the drop-in folder, and the row "fills in" → selectable. [onCatalogChanged] lets the parent
- * rescan the drop-in folder (so the param list seeds) after an install or a new selection.
+ * Pre-launch ReShade LOADOUT picker (Tier 1) — used by the container editor + per-game shortcut
+ * editor. Shows the current loadout summary + a "Browse / download" button that opens a catalog sheet
+ * listing EVERY effect from reshade.json: installed effects carry a checkbox that toggles loadout
+ * membership; not-yet-downloaded ones are greyed with a download affordance (tapping downloads, then
+ * the row "fills in" and is auto-added to the loadout). Multi-select — the sheet stays open so several
+ * effects can be added in one pass. [onCatalogChanged] lets the parent rescan the drop-in folder (so
+ * params seed) after an install.
  */
 @Composable
-fun ReshadeEffectPicker(
-    selected: String,
+fun ReshadeLoadoutPicker(
+    selectedNames: List<String>,
     supported: Boolean,
-    onSelect: (String) -> Unit,
+    onToggle: (String, Boolean) -> Unit,
+    onClear: () -> Unit,
     onCatalogChanged: () -> Unit,
 ) {
     var showSheet by remember { mutableStateOf(false) }
@@ -80,9 +81,10 @@ fun ReshadeEffectPicker(
 
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.weight(1f)) {
-            Text("ReShade effect", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            Text("ReShade loadout", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             Text(
-                if (selected.isBlank()) "None" else selected,
+                if (selectedNames.isEmpty()) "None"
+                else "${selectedNames.size} effect${if (selectedNames.size == 1) "" else "s"}: ${selectedNames.joinToString(", ")}",
                 style = MaterialTheme.typography.bodyLarge, color = cs.onSurface,
             )
         }
@@ -92,7 +94,7 @@ fun ReshadeEffectPicker(
             Text("Browse")
         }
     }
-    if (!supported && selected != "None" && selected.isNotBlank()) {
+    if (!supported && selectedNames.isNotEmpty()) {
         Text(
             "ReShade only applies to DXVK/VKD3D (Vulkan) games; it has no effect with this DX wrapper.",
             style = MaterialTheme.typography.bodySmall, color = cs.error,
@@ -102,9 +104,10 @@ fun ReshadeEffectPicker(
 
     if (showSheet) {
         ReshadeCatalogSheet(
-            selected = selected,
+            selectedNames = selectedNames.toSet(),
             onDismiss = { showSheet = false },
-            onSelect = { name -> onSelect(name); onCatalogChanged(); showSheet = false },
+            onToggle = onToggle,
+            onClear = onClear,
             onCatalogChanged = onCatalogChanged,
         )
     }
@@ -113,9 +116,10 @@ fun ReshadeEffectPicker(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReshadeCatalogSheet(
-    selected: String,
+    selectedNames: Set<String>,
     onDismiss: () -> Unit,
-    onSelect: (String) -> Unit,
+    onToggle: (String, Boolean) -> Unit,
+    onClear: () -> Unit,
     onCatalogChanged: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -144,6 +148,10 @@ private fun ReshadeCatalogSheet(
     // No live connection: only NETWORK means the catalog is current and not-installed effects are
     // downloadable. CACHE/NONE = offline → greyed rows can't be fetched.
     val offline = source != ReshadeCatalog.Source.NETWORK
+
+    // Selection is case-insensitive against the effect id.
+    val selectedLc = remember(selectedNames) { selectedNames.map { it.lowercase() }.toSet() }
+    fun isSelected(id: String) = id.lowercase() in selectedLc
 
     // Rows: catalog entries + any locally-installed effect not in the catalog (user-dropped), then
     // filtered by the search query (name/author/category) and split into the pinned "Installed"
@@ -179,7 +187,7 @@ private fun ReshadeCatalogSheet(
             if (ok) {
                 installed = installed + entry.id
                 onCatalogChanged()      // parent rescans → params seed
-                onSelect(entry.id)      // auto-select the freshly installed effect
+                onToggle(entry.id, true) // auto-add the freshly installed effect to the loadout
             } else errorMsg = "Failed to download ${entry.name}."
         }
     }
@@ -192,11 +200,16 @@ private fun ReshadeCatalogSheet(
         contentColor = cs.onSurface,
     ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
-            Text(
-                "ReShade Effects",
-                color = cs.onSurface, style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "ReShade Effects",
+                    color = cs.onSurface, style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (selectedNames.isNotEmpty()) {
+                    TextButton(onClick = onClear) { Text("Clear all", color = cs.primary) }
+                }
+            }
             if (offline && !loading) {
                 Text(
                     if (source == ReshadeCatalog.Source.CACHE)
@@ -238,19 +251,11 @@ private fun ReshadeCatalogSheet(
             } else {
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     LazyColumn(Modifier.fillMaxSize()) {
-                        // "None" clears the selection (hidden while searching to keep results tight).
-                        if (query.isBlank()) {
-                            item("__none__") {
-                                ReshadeNoneRow(isSelected = selected == "None" || selected.isBlank()) { onSelect("None") }
-                                Divider(color = cs.outlineVariant.copy(alpha = 0.5f))
-                            }
-                        }
-
                         if (installedRows.isNotEmpty()) {
                             item("__installed_hdr__") { GroupHeader("Installed (${installedRows.size})") }
                             items(installedRows, key = { "i_${it.id}" }) { entry ->
-                                CatalogRowItem(entry, installed, selected, downloadingId, phaseLabel, progress, offline, cs,
-                                    onSelect, { startDownload(it) }) { errorMsg = it }
+                                CatalogRowItem(entry, installed, ::isSelected, downloadingId, phaseLabel, progress, offline, cs,
+                                    onToggle, { startDownload(it) }) { errorMsg = it }
                                 Divider(color = cs.outlineVariant.copy(alpha = 0.5f))
                             }
                         }
@@ -258,8 +263,8 @@ private fun ReshadeCatalogSheet(
                         if (availableRows.isNotEmpty()) {
                             item("__available_hdr__") { GroupHeader("Available (${availableRows.size})") }
                             items(availableRows, key = { "a_${it.id}" }) { entry ->
-                                CatalogRowItem(entry, installed, selected, downloadingId, phaseLabel, progress, offline, cs,
-                                    onSelect, { startDownload(it) }) { errorMsg = it }
+                                CatalogRowItem(entry, installed, ::isSelected, downloadingId, phaseLabel, progress, offline, cs,
+                                    onToggle, { startDownload(it) }) { errorMsg = it }
                                 Divider(color = cs.outlineVariant.copy(alpha = 0.5f))
                             }
                         }
@@ -278,41 +283,42 @@ private fun ReshadeCatalogSheet(
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss) { Text("Close", color = cs.primary) }
+                TextButton(onClick = onDismiss) { Text("Done", color = cs.primary) }
             }
         }
     }
 }
 
-// One catalog row + its tap behaviour (select if installed; download if available + online; show a
-// hint if available but offline). Extracted so the Installed and Available groups share it.
+// One catalog row + its tap behaviour: installed rows TOGGLE loadout membership; available rows
+// download (if online) or hint (if offline). Extracted so both groups share it.
 @Composable
 private fun CatalogRowItem(
     entry: ReshadeCatalogEntry,
     installed: Set<String>,
-    selected: String,
+    isSelected: (String) -> Boolean,
     downloadingId: String?,
     phaseLabel: String,
     progress: Float,
     offline: Boolean,
     cs: ColorScheme,
-    onSelect: (String) -> Unit,
+    onToggle: (String, Boolean) -> Unit,
     onDownload: (ReshadeCatalogEntry) -> Unit,
     onHint: (String) -> Unit,
 ) {
     val isInstalled = entry.id in installed
     val isBusy = downloadingId == entry.id
+    val selected = isSelected(entry.id)
     ReshadeCatalogRow(
         entry = entry,
         isInstalled = isInstalled,
-        isSelected = selected.equals(entry.id, ignoreCase = true),
+        isSelected = selected,
         isBusy = isBusy,
         offline = offline,
         phaseLabel = if (isBusy) phaseLabel else "",
         progress = if (isBusy) progress else null,
         onClick = {
             when {
-                isInstalled -> onSelect(entry.id)
+                isInstalled -> onToggle(entry.id, !selected)             // toggle membership
                 downloadingId != null -> {}                              // one at a time
                 offline -> onHint("Connect to the internet to download effects.")
                 else -> onDownload(entry)
@@ -334,22 +340,6 @@ private fun GroupHeader(text: String) {
 }
 
 @Composable
-private fun ReshadeNoneRow(isSelected: Boolean, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("None", style = MaterialTheme.typography.bodyMedium, color = cs.onSurface, modifier = Modifier.weight(1f))
-        Icon(
-            if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-            contentDescription = null,
-            tint = if (isSelected) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(20.dp),
-        )
-    }
-}
-
-@Composable
 private fun ReshadeCatalogRow(
     entry: ReshadeCatalogEntry,
     isInstalled: Boolean,
@@ -361,9 +351,9 @@ private fun ReshadeCatalogRow(
     onClick: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
-    val installedBlue = Color(0xFF4FC3F7) // intentional: status color (installed/selected indicator, distinct from action accent)
+    val installedBlue = Color(0xFF4FC3F7) // intentional: status color (in-loadout indicator, distinct from action accent)
     // Not-installed rows render greyed; tapping them downloads. Installed rows are full-opacity and
-    // selectable.
+    // carry a checkbox reflecting loadout membership.
     val contentAlpha = if (isInstalled || isBusy) 1f else 0.5f
     Column(
         Modifier.fillMaxWidth().clickable(enabled = !isBusy, onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -393,9 +383,9 @@ private fun ReshadeCatalogRow(
             when {
                 isBusy -> {}
                 isInstalled -> Icon(
-                    if (isSelected) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                    if (isSelected) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
                     contentDescription = null, tint = if (isSelected) installedBlue else cs.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(22.dp),
                 )
                 offline -> Icon(Icons.Filled.CloudOff, contentDescription = "Offline", tint = cs.onSurfaceVariant, modifier = Modifier.size(22.dp))
                 else -> Icon(Icons.Filled.CloudDownload, contentDescription = "Download", tint = cs.primary, modifier = Modifier.size(22.dp))

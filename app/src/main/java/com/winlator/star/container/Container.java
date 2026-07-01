@@ -468,6 +468,38 @@ public class Container {
         putExtra("reshadeParams", (json == null || json.isEmpty()) ? null : json);
     }
 
+    // --- ReShade multi-effect loadout (Tier 1). reshadeLoadout is a JSON array of
+    // {"name":..,"enabled":..} in chain order; reshadeMode is "solo" (one active) or "stack" (any
+    // subset). The nested reshadeParams ({"<effect>":{uniform:value}}) hold per-effect overrides.
+    // When reshadeLoadout is absent the legacy single reshadeEffect + flat reshadeParams are migrated
+    // transparently (see ReshadeLoadout.parse / .paramsForEffect). "" = no loadout set.
+    public String getReshadeLoadout() {
+        return getExtra("reshadeLoadout", "");
+    }
+
+    public void setReshadeLoadout(String json) {
+        putExtra("reshadeLoadout", (json == null || json.isEmpty()) ? null : json);
+    }
+
+    public String getReshadeMode() {
+        return getExtra("reshadeMode", "solo");
+    }
+
+    public void setReshadeMode(String mode) {
+        putExtra("reshadeMode", (mode == null || mode.isEmpty()) ? null : mode);
+    }
+
+    // Master (whole-chain) on/off — mirrors the in-game ReShade drawer switch (enableOnLaunch). ON is
+    // the default whenever a loadout is present; only an explicit in-game OFF is stored ("0") so the
+    // absence of the key keeps the historical "on when there's something to show" behaviour.
+    public boolean getReshadeMasterEnabled() {
+        return !getExtra("reshadeMasterEnabled", "1").equals("0");
+    }
+
+    public void setReshadeMasterEnabled(boolean enabled) {
+        putExtra("reshadeMasterEnabled", enabled ? null : "0");
+    }
+
     public String getWineVersion() {
         return wineVersion;
     }

@@ -53,6 +53,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -88,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import com.winlator.star.R
+import com.winlator.star.reshade.ReshadeLoadout
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.ui.components.ColorPicker
 import com.winlator.star.ui.theme.LocalAccentDim
@@ -833,25 +836,26 @@ private fun ReshadeContent(state: XServerDrawerState) {
     ReshadeSection()
 }
 
-// Active effect name + master on/off + a typed control per uniform reflected from the .fx:
-// BOOL -> toggle, COMBO/RADIO/LIST -> dropdown (ui_items labels), COLOR (floatN) -> HSV picker,
-// FLOAT/INT (slider|drag) -> slider. Shows a placeholder on non-DXVK/VKD3D games or when no effect
-// is selected. "Reset" restores every tunable param to its .fx default (leaves on/off as-is).
-// Effect SELECTION is pre-launch (shortcut/container editor); this only tunes the loaded effect.
-// Every change rides the single onReshadeApply seam (-> applyReshadeLive: conf rewrite that the
-// patched libvkbasalt's mtime-watch picks up live, and persists to Container/shortcut reshadeParams).
+// Tier 1 multi-effect LOADOUT — the effects picked pre-launch, switchable LIVE here. A master
+// on/off (whole chain) + a Solo/Stack mode switch + one row per effect: an activation control (radio
+// in solo, checkbox in stack) and an expander revealing that effect's typed controls (BOOL -> toggle,
+// COMBO/RADIO/LIST -> dropdown, COLOR (floatN) -> HSV picker, FLOAT/INT -> slider) + a per-effect
+// Reset. In solo mode, activating one deactivates the others. Shows a placeholder on non-DXVK/VKD3D
+// games or with an empty loadout. Effect SELECTION is pre-launch (shortcut/container editor); this
+// toggles + tunes the loaded set. Every change rides the single onReshadeApply seam (-> applyReshadeLive:
+// conf rewrite the patched libvkbasalt mtime-watch picks up live, and persists to Container/shortcut).
 @Composable
 private fun ReshadeSection() {
     val accent = MaterialTheme.colorScheme.primary
     val supported by XServerDialogState.reshadeSupported.collectAsState()
-    val effectName by XServerDialogState.reshadeEffectName.collectAsState()
-    val params by XServerDialogState.reshadeParams.collectAsState()
-    val initEnabled by XServerDialogState.reshadeEnabled.collectAsState()
-    val initValues by XServerDialogState.reshadeValues.collectAsState()
+    // Seed ONCE from the flows (the launch/last-applied state). Read via .value (not collectAsState)
+    // so writing the snapshot back on each apply — for reopen consistency — doesn't re-key the live
+    // edit state and collapse the open row. The section is recomposed fresh whenever the tab reopens.
+    val seed = remember { XServerDialogState.reshadeLoadout.value }
 
-    if (!supported || effectName == "None" || effectName.isEmpty()) {
+    if (!supported || seed.isEmpty()) {
         Text(
-            "No ReShade effect selected. Pick one in this game's settings (or the container's) to tune it here.",
+            "No ReShade effects selected. Add one or more in this game's settings (or the container's) to switch and tune them here.",
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             fontSize = 11.sp,
             modifier = Modifier.padding(start = 4.dp, top = 6.dp)
@@ -859,79 +863,222 @@ private fun ReshadeSection() {
         return
     }
 
-    // Keyed on the live config so the controls reflect the seeded/launch values and don't drift.
-    var enabled by remember(initEnabled) { mutableStateOf(initEnabled) }
-    val values = remember(initValues) { mutableStateMapOf<String, Float>().apply { putAll(initValues) } }
-    // Bumped on Reset (and on a fresh seed) so COLOR pickers, which hold internal HSV state,
-    // re-seed from `values`. Sliders/toggles/dropdowns read `values` each recomposition already.
-    var resetNonce by remember(initValues) { mutableIntStateOf(0) }
-    val colorSeed = remember(initValues, resetNonce) { Any() }
+    var master by remember { mutableStateOf(XServerDialogState.reshadeMasterEnabled.value) }
+    var mode by remember { mutableStateOf(XServerDialogState.reshadeMode.value) }
+    val enabledState = remember { mutableStateMapOf<String, Boolean>().apply { seed.forEach { put(it.name, it.enabled) } } }
+    // One SnapshotStateMap of live values per effect (keyed by effect name).
+    val valueState = remember { seed.associate { it.name to mutableStateMapOf<String, Float>().apply { putAll(it.values) } } }
+    // Bumped on any per-effect Reset so COLOR pickers (internal HSV state) re-seed from `values`.
+    var resetNonce by remember { mutableIntStateOf(0) }
+    val colorSeed = remember(resetNonce) { Any() }
+    // Which effect row is expanded to reveal its params (default: the first).
+    var expanded by remember { mutableStateOf(seed.firstOrNull()?.name) }
 
-    fun apply() {
-        XServerDialogState.setReshadeEnabled(enabled)
-        XServerDialogState.setReshadeValues(values.toMap())
-        XServerDialogState.onReshadeApply?.invoke(enabled, values.toMap())
+    fun snapshot(): List<ReshadeLoadoutItem> = seed.map { item ->
+        item.copy(
+            enabled = enabledState[item.name] ?: item.enabled,
+            values = valueState[item.name]?.toMap() ?: item.values
+        )
     }
-
-    fun resetDefaults() {
-        values.clear()
-        params.forEach { p -> ReshadeManager.seedValues(p, null, values) }
-        resetNonce++
+    fun apply() {
+        val snap = snapshot()
+        XServerDialogState.setReshadeMasterEnabled(master)
+        XServerDialogState.setReshadeMode(mode)
+        XServerDialogState.setReshadeLoadout(snap)
+        XServerDialogState.onReshadeApply?.invoke(master, mode, snap)
+    }
+    fun setEnabled(name: String, on: Boolean) {
+        if (mode == ReshadeLoadout.MODE_SOLO && on) {
+            // Solo: activating one deactivates the rest.
+            enabledState.keys.toList().forEach { enabledState[it] = (it == name) }
+        } else {
+            enabledState[name] = on
+        }
+        apply()
+    }
+    fun setMode(newMode: String) {
+        mode = newMode
+        // Switching to solo: keep only the first enabled effect active.
+        if (newMode == ReshadeLoadout.MODE_SOLO) {
+            var seen = false
+            seed.forEach { item ->
+                val on = enabledState[item.name] ?: false
+                if (on && !seen) seen = true else enabledState[item.name] = false
+            }
+        }
         apply()
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text(
-            effectName, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp,
-            modifier = Modifier.weight(1f).padding(start = 4.dp)
-        )
-        TextButton(onClick = { resetDefaults() }, enabled = params.isNotEmpty()) {
-            Text("Reset", color = accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    // "Live preview" — persisted global toggle. ON = changes apply live while the game runs. OFF
+    // (default) = freeze-frame + pulse preview (first change SIGSTOPs; each later change briefly
+    // resumes 1–2 frames to reveal it, then re-freezes). The activity owns the flag + the freeze/
+    // pulse; this just reports it. Independent of `master` so it can be set before enabling ReShade.
+    var livePreview by remember { mutableStateOf(XServerDialogState.reshadeLivePreview.value) }
+
+    ToggleRow("ReShade", master, true) { master = it; apply() }
+
+    ToggleRow("Live preview", livePreview, true) {
+        livePreview = it
+        XServerDialogState.setReshadeLivePreview(it)
+        XServerDialogState.onReshadeLivePreviewChange?.invoke(it)
+    }
+    Text(
+        if (livePreview) "Changes apply live; the game keeps running."
+        else "Game freezes while tuning; each change pulses briefly to preview, then re-freezes.",
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+        fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp)
+    )
+
+    if (master) {
+        ReshadeModeSelector(mode) { setMode(it) }
+        seed.forEach { item ->
+            val itemEnabled = enabledState[item.name] ?: item.enabled
+            val isOpen = expanded == item.name
+            // Activation control + label + expander.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (mode == ReshadeLoadout.MODE_SOLO) {
+                    RadioButton(
+                        selected = itemEnabled,
+                        onClick = { setEnabled(item.name, true) },
+                        colors = RadioButtonDefaults.colors(selectedColor = accent)
+                    )
+                } else {
+                    Checkbox(
+                        checked = itemEnabled,
+                        onCheckedChange = { setEnabled(item.name, it) },
+                        colors = CheckboxDefaults.colors(checkedColor = accent)
+                    )
+                }
+                Text(
+                    item.name,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 12.sp,
+                    fontWeight = if (itemEnabled) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f).clickable { expanded = if (isOpen) null else item.name }
+                )
+                IconButton(onClick = { expanded = if (isOpen) null else item.name }) {
+                    Icon(
+                        if (isOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (isOpen) {
+                val values = valueState[item.name] ?: mutableStateMapOf()
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = {
+                        values.clear()
+                        item.params.forEach { p -> ReshadeManager.seedValues(p, null, values) }
+                        resetNonce++
+                        apply()
+                    }, enabled = item.params.isNotEmpty()) {
+                        Text("Reset", color = accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                if (item.params.isEmpty()) {
+                    Text(
+                        "No tunable parameters.",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                    )
+                } else {
+                    ReshadeEffectParams(item.params, values, colorSeed) { apply() }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
         }
     }
-    ToggleRow("Effect", enabled, true) { enabled = it; apply() }
+}
 
-    if (enabled) {
-        params.forEach { p ->
-            when (p.type) {
-                ReshadeManager.ParamType.BOOL -> {
-                    val v = values[p.name] ?: p.defaultValue
-                    Spacer(Modifier.height(4.dp))
-                    ToggleRow(p.label, v >= 0.5f, true) {
-                        values[p.name] = if (it) 1f else 0f; apply()
+// Solo/Stack mode switch — two pills. Solo = one effect active (A/B); Stack = layered subset.
+@Composable
+private fun ReshadeModeSelector(mode: String, onChange: (String) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        listOf(ReshadeLoadout.MODE_SOLO to "Solo", ReshadeLoadout.MODE_STACK to "Stack").forEach { (value, label) ->
+            val selected = mode == value
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) accent.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface)
+                    .border(1.dp, if (selected) accent else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                    .clickable { onChange(value) }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    label,
+                    color = if (selected) accent else MaterialTheme.colorScheme.onSurface,
+                    fontSize = 12.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        }
+    }
+    Text(
+        if (mode == ReshadeLoadout.MODE_SOLO) "One effect at a time (A/B compare)."
+        else "Layer any subset of effects.",
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+        fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+    )
+}
+
+// The typed controls for ONE effect (reused by each expanded loadout row). BOOL -> toggle,
+// COMBO/RADIO/LIST -> dropdown, COLOR (floatN) -> HSV picker, FLOAT/INT (slider|drag) -> slider.
+@Composable
+private fun ReshadeEffectParams(
+    params: List<ReshadeManager.ReshadeParam>,
+    values: androidx.compose.runtime.snapshots.SnapshotStateMap<String, Float>,
+    colorSeed: Any,
+    onApply: () -> Unit,
+) {
+    params.forEach { p ->
+        when (p.type) {
+            ReshadeManager.ParamType.BOOL -> {
+                val v = values[p.name] ?: p.defaultValue
+                Spacer(Modifier.height(4.dp))
+                ToggleRow(p.label, v >= 0.5f, true) {
+                    values[p.name] = if (it) 1f else 0f; onApply()
+                }
+            }
+            ReshadeManager.ParamType.COMBO -> {
+                val idx = (values[p.name] ?: p.defaultValue).roundToInt()
+                ReshadeDropdown(p.label, p.options ?: emptyList(), idx) { sel ->
+                    values[p.name] = sel.toFloat(); onApply()
+                }
+            }
+            ReshadeManager.ParamType.COLOR -> {
+                ReshadeColorControl(
+                    label = p.label,
+                    components = p.components,
+                    seedKey = colorSeed,
+                    component = { c -> values["${p.name}_$c"] ?: p.componentDefaults?.getOrNull(c) ?: 0f },
+                    onChange = { comps ->
+                        comps.forEachIndexed { c, value -> values["${p.name}_$c"] = value }
+                        onApply()
                     }
-                }
-                ReshadeManager.ParamType.COMBO -> {
-                    val idx = (values[p.name] ?: p.defaultValue).roundToInt()
-                    ReshadeDropdown(p.label, p.options ?: emptyList(), idx) { sel ->
-                        values[p.name] = sel.toFloat(); apply()
+                )
+            }
+            else -> {
+                val v = (values[p.name] ?: p.defaultValue).coerceIn(p.min, p.max)
+                Spacer(Modifier.height(4.dp))
+                LabeledSlider(
+                    p.label, v, p.min..p.max,
+                    { values[p.name] = it },
+                    { onApply() },
+                    format = {
+                        if (p.type == ReshadeManager.ParamType.INT) it.toInt().toString()
+                        else "%.2f".format(it)
                     }
-                }
-                ReshadeManager.ParamType.COLOR -> {
-                    ReshadeColorControl(
-                        label = p.label,
-                        components = p.components,
-                        seedKey = colorSeed,
-                        component = { c -> values["${p.name}_$c"] ?: p.componentDefaults?.getOrNull(c) ?: 0f },
-                        onChange = { comps ->
-                            comps.forEachIndexed { c, value -> values["${p.name}_$c"] = value }
-                            apply()
-                        }
-                    )
-                }
-                else -> {
-                    val v = (values[p.name] ?: p.defaultValue).coerceIn(p.min, p.max)
-                    Spacer(Modifier.height(4.dp))
-                    LabeledSlider(
-                        p.label, v, p.min..p.max,
-                        { values[p.name] = it },
-                        { apply() },
-                        format = {
-                            if (p.type == ReshadeManager.ParamType.INT) it.toInt().toString()
-                            else "%.2f".format(it)
-                        }
-                    )
-                }
+                )
             }
         }
     }

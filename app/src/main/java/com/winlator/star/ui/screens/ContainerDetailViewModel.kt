@@ -112,33 +112,17 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // Manual refresh-rate lock (Hz) used when Auto (matchRefreshRate) is OFF. 0 = none/native.
     var manualRefreshRate by mutableStateOf(0)
 
-    // ReShade effect (vkBasalt drop-in), per-container default. The per-game shortcut can override.
-    // "None" = no effect. Param values are reflected from the .fx and seeded on selection change.
-    var reshadeEffect by mutableStateOf("None")
-    val reshadeParamValues = androidx.compose.runtime.mutableStateMapOf<String, Float>()
+    // ReShade multi-effect LOADOUT (Tier 1), per-container default. The per-game shortcut can override.
+    // ReshadeLoadoutState holds the ordered effects, per-effect enabled + params, and the solo/stack
+    // mode; it serializes to reshadeLoadout + reshadeMode + nested reshadeParams (with legacy migration).
+    val reshadeLoadout = ReshadeLoadoutState()
     var reshadeEffects by mutableStateOf<List<com.winlator.star.reshade.ReshadeManager.ReshadeEffect>>(emptyList()); private set
-    val reshadeEffectNames: List<String> get() = listOf("None") + reshadeEffects.map { it.name }
-    // Seed param values for the selected effect: saved JSON wins, else the .fx defaults.
-    fun selectReshadeEffect(name: String, savedJson: String) {
-        reshadeEffect = name
-        reshadeParamValues.clear()
-        val effect = reshadeEffects.firstOrNull { it.name == name } ?: return
-        val saved = runCatching { if (savedJson.isNotEmpty()) JSONObject(savedJson) else null }.getOrNull()
-        // seedValues writes the value-map key scheme (one entry per uniform; per-component for COLOR).
-        for (p in effect.params) com.winlator.star.reshade.ReshadeManager.seedValues(p, saved, reshadeParamValues)
-    }
-    fun reshadeParamsJsonOrNull(): String? =
-        if (reshadeEffect == "None" || reshadeParamValues.isEmpty()) null
-        else JSONObject().apply { reshadeParamValues.forEach { (k, v) -> put(k, v.toDouble()) } }.toString()
 
-    /** Re-scan the drop-in folder (e.g. after a catalog download) and re-seed the selected effect's
-     *  params, preserving any saved overrides. Drops the selection only if its folder vanished. */
+    /** Re-scan the drop-in folder (e.g. after a catalog download) and reconcile the loadout: seed
+     *  newly-reflected params, drop effects whose folder vanished, keep current selections/values. */
     fun rescanReshadeEffects() {
         reshadeEffects = com.winlator.star.reshade.ReshadeManager.scanEffects(context)
-        selectReshadeEffect(
-            if (reshadeEffectNames.contains(reshadeEffect)) reshadeEffect else "None",
-            container?.getReshadeParams() ?: ""
-        )
+        reshadeLoadout.reconcile(reshadeEffects)
     }
 
     // ── Renderer ──────────────────────────────────────────────────────────────
@@ -349,12 +333,11 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         matchRefreshRate   = c?.isMatchRefreshRate != false   // default ON for new/unset containers
         manualRefreshRate  = c?.manualRefreshRate ?: 0
 
-        // ReShade: scan the drop-in folder, then seed the selected effect + its param values.
+        // ReShade: scan the drop-in folder, then load the loadout (migrating a legacy single effect).
         reshadeEffects = com.winlator.star.reshade.ReshadeManager.scanEffects(context)
-        val savedEffect = c?.getReshadeEffect() ?: "None"
-        selectReshadeEffect(
-            if (reshadeEffectNames.contains(savedEffect)) savedEffect else "None",
-            c?.getReshadeParams() ?: ""
+        reshadeLoadout.init(
+            reshadeEffects,
+            c?.getReshadeLoadout(), c?.getReshadeMode(), c?.getReshadeParams(), c?.getReshadeEffect()
         )
 
         // Renderer
@@ -623,8 +606,10 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
             c.setManualRefreshRate(manualRefreshRate)
-            c.setReshadeEffect(reshadeEffect)
-            c.setReshadeParams(reshadeParamsJsonOrNull())
+            c.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
+            c.setReshadeMode(reshadeLoadout.mode)
+            c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
+            c.setReshadeEffect(reshadeLoadout.firstEffectName())
             c.setExclusiveXInput(exclusiveXInput)
             c.setRenderer(StringUtils.parseIdentifier(selectedRenderer))
             c.setRendererNative(rendererNative)
@@ -695,8 +680,10 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                     created.setFpsLimiterEnabled(fpsLimiterEnabled)
                     created.setMatchRefreshRate(matchRefreshRate)
                     created.setManualRefreshRate(manualRefreshRate)
-                    created.setReshadeEffect(reshadeEffect)
-                    created.setReshadeParams(reshadeParamsJsonOrNull())
+                    created.setReshadeLoadout(reshadeLoadout.loadoutJsonOrNull())
+                    created.setReshadeMode(reshadeLoadout.mode)
+                    created.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
+                    created.setReshadeEffect(reshadeLoadout.firstEffectName())
                     if (renderScale != "1.0") created.putExtra("renderScale", renderScale)
                     if (!autoCloseOnExit) created.putExtra("autoCloseOnExit", "0")  // default ON
                     created.saveData()

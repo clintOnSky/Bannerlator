@@ -185,40 +185,64 @@ object XServerDialogState {
     @JvmField var onVulkanScreenEffectsApply: VulkanScreenEffectsCallback? = null
 
     // -------------------------------------------------------------------------
-    // ReShade (vkBasalt) — in-game section under Graphics. Mirrors Frame Generation:
-    // on/off + a slider per uniform reflected from the selected .fx. The effect is chosen
-    // pre-launch (in the shortcut/container editor); this section tunes the loaded effect.
-    // Supported only on DXVK/VKD3D (Vulkan) games — the drawer greys/hides the section
-    // otherwise (mirrors how SGSR/HDR are gated). Live-apply rides a SINGLE pluggable seam
-    // (onReshadeApply -> applyReshadeLive) so the X11-inject / native config-watch
-    // workstream can wire true liveness in one place; until then changes apply on relaunch.
+    // ReShade (vkBasalt) — in-game tab. Tier 1: a multi-effect LOADOUT the user switches between
+    // LIVE. All loadout effects are compiled into the chain up front; per-effect flags decide which
+    // present. A solo/stack MODE governs how many can be active at once (solo = radio/one-at-a-time
+    // for A/B; stack = checkboxes/layered). The effects are chosen pre-launch (shortcut/container
+    // editor); this tab toggles + tunes them. Supported only on DXVK/VKD3D (Vulkan) games — the tab
+    // greys/hides otherwise (mirrors how SGSR/HDR are gated). Every change rides a SINGLE pluggable
+    // seam (onReshadeApply -> applyReshadeLive: conf rewrite the patched libvkbasalt mtime-watch
+    // reloads live, and persists to Container/shortcut).
     // -------------------------------------------------------------------------
     private val _reshadeSupported = MutableStateFlow(false)
     val reshadeSupported: StateFlow<Boolean> = _reshadeSupported
     fun setReshadeSupported(v: Boolean) { _reshadeSupported.value = v }
 
-    private val _reshadeEffectName = MutableStateFlow("None")
-    val reshadeEffectName: StateFlow<String> = _reshadeEffectName
-    fun setReshadeEffectName(v: String) { _reshadeEffectName.value = v }
+    // Master (whole-chain) on/off — enableOnLaunch. Independent of the per-effect flags.
+    private val _reshadeMasterEnabled = MutableStateFlow(false)
+    val reshadeMasterEnabled: StateFlow<Boolean> = _reshadeMasterEnabled
+    fun setReshadeMasterEnabled(v: Boolean) { _reshadeMasterEnabled.value = v }
 
-    private val _reshadeEnabled = MutableStateFlow(false)
-    val reshadeEnabled: StateFlow<Boolean> = _reshadeEnabled
-    fun setReshadeEnabled(v: Boolean) { _reshadeEnabled.value = v }
+    // "solo" (one active) | "stack" (any subset). Governs the activation controls (radio vs checkbox).
+    private val _reshadeMode = MutableStateFlow(com.winlator.star.reshade.ReshadeLoadout.MODE_SOLO)
+    val reshadeMode: StateFlow<String> = _reshadeMode
+    fun setReshadeMode(v: String) { _reshadeMode.value = com.winlator.star.reshade.ReshadeLoadout.normalizeMode(v) }
 
-    // Reflected params of the loaded effect + their current values. The params list is set once
-    // at launch (seeded after the container is assigned); values mutate as sliders move.
-    private val _reshadeParams = MutableStateFlow<List<com.winlator.star.reshade.ReshadeManager.ReshadeParam>>(emptyList())
-    val reshadeParams: StateFlow<List<com.winlator.star.reshade.ReshadeManager.ReshadeParam>> = _reshadeParams
-    fun setReshadeParams(v: List<com.winlator.star.reshade.ReshadeManager.ReshadeParam>) { _reshadeParams.value = v }
+    // The loadout: ordered effects, each with enabled + reflected params + current values. Set once
+    // at launch (seeded after the container is assigned); the drawer edits copies + reports snapshots.
+    private val _reshadeLoadout = MutableStateFlow<List<ReshadeLoadoutItem>>(emptyList())
+    val reshadeLoadout: StateFlow<List<ReshadeLoadoutItem>> = _reshadeLoadout
+    fun setReshadeLoadout(v: List<ReshadeLoadoutItem>) { _reshadeLoadout.value = v }
 
-    private val _reshadeValues = MutableStateFlow<Map<String, Float>>(emptyMap())
-    val reshadeValues: StateFlow<Map<String, Float>> = _reshadeValues
-    fun setReshadeValues(v: Map<String, Float>) { _reshadeValues.value = v }
-
-    // enabled + the full current value map. The activity rewrites the conf (and, once the live
-    // mechanism lands, hot-applies) in applyReshadeLive.
-    fun interface ReshadeApplyCallback { fun invoke(enabled: Boolean, values: Map<String, Float>) }
+    // Full drawer snapshot: master on/off + mode + the per-effect (enabled + values) loadout. The
+    // activity rewrites the conf (mtime bump → live) and persists in applyReshadeLive.
+    fun interface ReshadeApplyCallback {
+        fun invoke(masterEnabled: Boolean, mode: String, items: List<ReshadeLoadoutItem>)
+    }
     @JvmField var onReshadeApply: ReshadeApplyCallback? = null
+
+    // "Live preview" — persisted global toggle at the top of the ReShade tab. ON = ReShade changes
+    // apply live while the game keeps running (today's behaviour). OFF (default) = "freeze-frame +
+    // pulse" preview: the first committed change SIGSTOPs the game; each subsequent change briefly
+    // resumes for 1–2 presents to reveal the new look, then re-freezes. The activity owns the flag
+    // (seeded from SharedPreferences in setupUI); this flow mirrors it for the drawer toggle.
+    private val _reshadeLivePreview = MutableStateFlow(false)
+    val reshadeLivePreview: StateFlow<Boolean> = _reshadeLivePreview
+    fun setReshadeLivePreview(v: Boolean) { _reshadeLivePreview.value = v }
+
+    fun interface BoolCallback { fun invoke(value: Boolean) }
+    @JvmField var onReshadeLivePreviewChange: BoolCallback? = null
+
+    // -------------------------------------------------------------------------
+    // Paused / frozen state — single mirror of the activity's `isPaused`. Drives the centered
+    // "Paused — tap to resume" box in the dialog host (covers BOTH the ReShade freeze-frame preview
+    // and a normal manual Pause). The activity is the single source of truth; it writes this flow
+    // whenever the guest is suspended/resumed. Tapping the box fires onRequestResume (full resume).
+    // -------------------------------------------------------------------------
+    private val _paused = MutableStateFlow(false)
+    val paused: StateFlow<Boolean> = _paused
+    fun setPaused(v: Boolean) { _paused.value = v }
+    @JvmField var onRequestResume: Runnable? = null
 
     // -------------------------------------------------------------------------
     // Vibration dialog
@@ -447,10 +471,11 @@ object XServerDialogState {
         _vkCrt.value           = false
         _vkNtsc.value          = false
         _reshadeSupported.value = false
-        _reshadeEffectName.value = "None"
-        _reshadeEnabled.value  = false
-        _reshadeParams.value   = emptyList()
-        _reshadeValues.value   = emptyMap()
+        _reshadeMasterEnabled.value = false
+        _reshadeMode.value     = com.winlator.star.reshade.ReshadeLoadout.MODE_SOLO
+        _reshadeLoadout.value  = emptyList()
+        _reshadeLivePreview.value = false
+        _paused.value          = false
         _vibrationSlots.value  = emptyList()
         _logLines.value        = emptyList()
         _logPaused.value       = false
@@ -482,6 +507,8 @@ object XServerDialogState {
         onDebandApply = null
         onVulkanScreenEffectsApply = null
         onReshadeApply = null
+        onReshadeLivePreviewChange = null
+        onRequestResume = null
         onVibrationSlotChanged = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null

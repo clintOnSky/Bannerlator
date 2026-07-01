@@ -205,6 +205,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
     PreloaderDialog preloaderDialog = null;
     private Runnable configChangedCallback = null;
     private boolean isPaused = false;
+    // ReShade "freeze-frame preview" (Live preview OFF): the guest is SIGSTOP'd while tuning and each
+    // committed change briefly pulses to reveal it. reshadeLivePreview mirrors the persisted toggle;
+    // reshadePreviewPaused marks the current freeze as preview-owned (a subset of isPaused, so tapping
+    // the pause box or manually resuming clears it); reshadePulseInProgress serializes overlapping
+    // pulses. isPaused stays the single source of truth for "frozen"; a pulse blips SIGCONT/SIGSTOP
+    // underneath it without flipping the UI state.
+    private boolean reshadeLivePreview = false;
+    private boolean reshadePreviewPaused = false;
+    private volatile boolean reshadePulseInProgress = false;
+    private static final int RESHADE_PULSE_TARGET_PRESENTS = 2;   // real presents to reveal a change
+    private static final long RESHADE_PULSE_FALLBACK_MS = 80L;    // re-freeze if the game isn't presenting
     private boolean isRelativeMouseMovement = false;
     private boolean isMouseDisabled = false;
     private boolean pointerCaptureRequested = false;
@@ -612,16 +623,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             xServerView.getRenderer().toggleFullscreen();
             touchpadView.toggleFullscreen();
         };
-        state.onPauseResume            = () -> {
-            if (isPaused) {
-                ProcessHelper.resumeAllWineProcesses();
-                isPaused = false;
-            } else {
-                ProcessHelper.pauseAllWineProcesses();
-                isPaused = true;
-            }
-            state.setIsPaused(isPaused);
-        };
+        state.onPauseResume            = () -> setPausedState(!isPaused);
         state.onPipMode                = () -> enterPictureInPictureMode();
         state.onActiveWindows          = () -> showActiveWindowsDialog();
         state.onTaskManager            = () -> {
@@ -1180,6 +1182,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         startTime = System.currentTimeMillis();
         handler.postDelayed(savePlaytimeRunnable, SAVE_INTERVAL_MS);
         ProcessHelper.resumeAllWineProcesses();
+        // Returning to the foreground unconditionally resumes the guest (above) — keep the paused
+        // UI/state in sync so a stale pause box / Pause-button state can't linger over a running game.
+        if (isPaused) setPausedState(false);
         // Re-assert the VRR vote — onStop() released it when backgrounded.
         reapplyVrr();
         // Track the live panel rate again (the readout shows it while Auto is on).
@@ -1270,78 +1275,108 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // it. effects = <reshade>:cas  (sharpen LAST, the usual order). Returns the host-absolute conf
     // path for VKBASALT_CONFIG_FILE, or null when no ReShade effect is selected (caller then keeps
     // the legacy inline CAS path untouched).
-    private String writeVkBasaltConfig() { return writeVkBasaltConfig(true); }
+    // Launch-time write: honor the persisted master (enableOnLaunch) so an in-game ReShade OFF sticks.
+    private String writeVkBasaltConfig() { return writeVkBasaltConfig(resolveReshade().masterEnabled, true); }
+    private String writeVkBasaltConfig(boolean enableOnLaunch) { return writeVkBasaltConfig(enableOnLaunch, false); }
 
-    // enableOnLaunch controls the live ReShade on/off: our patched libvkbasalt watches this conf's
-    // mtime and re-reads `enableOnLaunch` into presentEffect (passthrough vs effect) WITHOUT a
-    // recompile, so flipping it here is what makes the in-game "Effect" toggle disable the effect
-    // live. The effect stays in the chain (still compiled) either way — only the present is bypassed.
-    private String writeVkBasaltConfig(boolean enableOnLaunch) {
-        String effectName = resolvedReshadeEffect();
-        if (effectName == null || effectName.equals("None") || effectName.isEmpty()) return null;
+    // Tier 1 multi-effect loadout. Every loadout effect is COMPILED into the vkBasalt chain up front
+    // (effects = e1:e2:..:cas); the per-effect `<ei>_enabled = 0|1` flag decides which of them present
+    // (1 = active, 0 = bypassed) so the in-game drawer can flip them LIVE with no recompile. Master
+    // enableOnLaunch (whole chain) is independent: our patched libvkbasalt watches this conf's mtime
+    // and re-reads enableOnLaunch into presentEffect (passthrough vs effect) AND each `_enabled` flag
+    // WITHOUT recompiling, so a drawer change here turns effects on/off live.
+    //
+    // restage: re-copy each effect's drop-in folder into the guest HOME (.config/vkBasalt/effects/<name>/)
+    // so path edits take effect. True on launch; false for live in-game apply (folders don't change
+    // mid-session, so we skip the IO and just rewrite the conf → mtime bump → layer reloads).
+    private String writeVkBasaltConfig(boolean enableOnLaunch, boolean restage) {
         if (!reshadeSupported()) return null; // WineD3D/GL/GDI titles can't carry the layer
 
-        com.winlator.star.reshade.ReshadeManager.ReshadeEffect effect =
-            com.winlator.star.reshade.ReshadeManager.findEffect(this, effectName);
-        if (effect == null) {
-            Log.w("VkBasalt", "Selected ReShade effect not found in drop-in folder: " + effectName);
-            return null;
-        }
+        ResolvedReshade rr = resolveReshade();
+        if (rr.loadout.isEmpty()) return null; // no loadout / all "None" -> legacy inline-CAS path
 
         try {
             File configDir = new File(imageFs.home_path, ".config/vkBasalt");
             File effectsRoot = new File(configDir, "effects");
-            File destDir = new File(effectsRoot, effect.name);
-            // Refresh the staged copy each launch so edits to the drop-in folder take effect.
-            FileUtils.delete(destDir);
-            destDir.mkdirs();
-            if (!FileUtils.copy(effect.dir, destDir)) {
-                Log.e("VkBasalt", "Failed to stage ReShade effect folder: " + effect.dir);
-                return null;
-            }
-            String destDirPath = destDir.getAbsolutePath();           // host-absolute
-            File fxDest = new File(destDir, effect.fxFile.getName());
-            String fxPath = fxDest.getAbsolutePath();
-
-            // Parsed per-uniform overrides (shortcut/container JSON) layered over the .fx defaults.
-            org.json.JSONObject paramJson = null;
-            String paramsRaw = resolvedReshadeParams();
-            if (paramsRaw != null && !paramsRaw.isEmpty()) {
-                try { paramJson = new org.json.JSONObject(paramsRaw); }
-                catch (org.json.JSONException ignored) {}
-            }
-
-            // The effect technique name vkBasalt keys on. vkBasalt derives it from the config key
-            // (effectKey = path). Use a stable, lower-case, syntax-safe key.
-            String effectKey = effect.name.replaceAll("[^A-Za-z0-9_]", "_").toLowerCase(java.util.Locale.US);
-            if (effectKey.isEmpty()) effectKey = "reshade";
 
             StringBuilder sb = new StringBuilder();
-            sb.append("# Written by Bannerlator (per-game ReShade effect via vkBasalt)\n");
-            // Sharpen LAST: reshade first, then the existing CAS/DLS chain (if any).
-            StringBuilder chain = new StringBuilder(effectKey);
+            sb.append("# Written by Bannerlator (per-game ReShade loadout via vkBasalt)\n");
+
+            StringBuilder chain = new StringBuilder();       // e1:e2:...:en (CAS appended after)
+            StringBuilder effectLines = new StringBuilder();  // per-effect: <ei> = fx + uniforms + _enabled
+            List<String> stagedDirs = new ArrayList<>();
+            int idx = 0;
+
+            for (com.winlator.star.reshade.ReshadeLoadout.Entry entry : rr.loadout) {
+                com.winlator.star.reshade.ReshadeManager.ReshadeEffect effect =
+                    com.winlator.star.reshade.ReshadeManager.findEffect(this, entry.name);
+                if (effect == null) {
+                    // Skip-and-continue: one missing effect must not kill the rest of the chain.
+                    Log.w("VkBasalt", "ReShade loadout effect not found, skipping: " + entry.name);
+                    continue;
+                }
+
+                // The effect technique name vkBasalt keys on (stable, lower-case, syntax-safe).
+                String effectKey = effect.name.replaceAll("[^A-Za-z0-9_]", "_").toLowerCase(java.util.Locale.US);
+                if (effectKey.isEmpty()) effectKey = "reshade" + idx;
+
+                File destDir = new File(effectsRoot, effect.name);
+                if (restage || !destDir.isDirectory()) {
+                    FileUtils.delete(destDir);
+                    destDir.mkdirs();
+                    if (!FileUtils.copy(effect.dir, destDir)) {
+                        Log.e("VkBasalt", "Failed to stage ReShade effect folder: " + effect.dir);
+                        continue;
+                    }
+                }
+                String destDirPath = destDir.getAbsolutePath();           // host-absolute
+                File fxDest = new File(destDir, effect.fxFile.getName());
+                String fxPath = fxDest.getAbsolutePath();
+                stagedDirs.add(destDirPath);
+
+                if (chain.length() > 0) chain.append(":");
+                chain.append(effectKey);
+
+                // Per-effect source path.
+                effectLines.append(effectKey).append(" = ").append(fxPath).append("\n");
+
+                // Per-uniform overrides for THIS effect (nested {"<effect>":{...}}, or migrated flat
+                // legacy), layered over the .fx defaults. seedValues resolves the value-map key scheme;
+                // formatUniformLine writes the "<effectKey>_<uniform>[_c]" keys the layer reads.
+                org.json.JSONObject paramJson = com.winlator.star.reshade.ReshadeLoadout.paramsForEffect(
+                        rr.paramsJson, effect.name, rr.nested, rr.legacyEffect);
+                HashMap<String, Float> resolved = new HashMap<>();
+                for (com.winlator.star.reshade.ReshadeManager.ReshadeParam p : effect.params) {
+                    com.winlator.star.reshade.ReshadeManager.seedValues(p, paramJson, resolved);
+                }
+                for (com.winlator.star.reshade.ReshadeManager.ReshadeParam p : effect.params) {
+                    effectLines.append(formatUniformLine(effectKey, p, resolved));
+                }
+
+                // NEW per-effect enable flag the patch reads (1 = active, 0 = bypassed).
+                effectLines.append(effectKey).append("_enabled = ").append(entry.enabled ? "1" : "0").append("\n");
+                idx++;
+            }
+
+            if (chain.length() == 0) {
+                Log.w("VkBasalt", "No ReShade loadout effects could be staged; skipping conf");
+                return null;
+            }
+
+            // Sharpen LAST: the loadout chain first, then the existing CAS/DLS chain (if any).
             if (vkbasaltConfig != null && !vkbasaltConfig.isEmpty()) {
-                // The legacy inline string is "effects=<cas|dls>;casSharpness=..;...". Pull the
-                // effect name + carry the sharpness keys into this merged file.
                 appendSharpnessFromInline(sb, chain);
             }
             sb.append("effects = ").append(chain).append("\n");
-            sb.append(effectKey).append(" = ").append(fxPath).append("\n");
-            sb.append("reshadeTexturePath = ").append(destDirPath).append("\n");
-            sb.append("reshadeIncludePath = ").append(destDirPath).append("\n");
+            sb.append(effectLines);
 
-            // Reflected uniform values (defaults, overridden by the saved per-game/container JSON).
-            // vkBasalt reads `.fx` shaders (NOT ReShade preset .ini), so we materialize the values as
-            // top-level conf keys named after each uniform. seedValues() resolves the value-map (one
-            // entry per uniform, or per-component for COLOR); formatUniformLine() is the single place
-            // that maps those to the "<effectKey>_<uniform>[_c]" conf keys our patched libvkbasalt reads.
-            HashMap<String, Float> resolved = new HashMap<>();
-            for (com.winlator.star.reshade.ReshadeManager.ReshadeParam p : effect.params) {
-                com.winlator.star.reshade.ReshadeManager.seedValues(p, paramJson, resolved);
-            }
-            for (com.winlator.star.reshade.ReshadeManager.ReshadeParam p : effect.params) {
-                sb.append(formatUniformLine(effectKey, p, resolved));
-            }
+            // Texture/include search paths. Co-located #includes already resolve relative to each
+            // staged .fx (device-proven), so these are a fallback — colon-join every staged dir
+            // (vkBasalt splits these list paths on ':', same as the effects list). Single-effect
+            // loadouts collapse to exactly one path (identical to the pre-Tier-1 conf).
+            String pathList = android.text.TextUtils.join(":", stagedDirs);
+            sb.append("reshadeTexturePath = ").append(pathList).append("\n");
+            sb.append("reshadeIncludePath = ").append(pathList).append("\n");
 
             sb.append("toggleKey = Home\n");
             sb.append("enableOnLaunch = ").append(enableOnLaunch ? "True" : "False").append("\n");
@@ -1349,7 +1384,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             File confFile = new File(configDir, "vkBasalt.conf");
             FileUtils.writeString(confFile, sb.toString());
             String confPath = confFile.getAbsolutePath();
-            Log.d("VkBasalt", "Wrote merged ReShade conf (" + chain + ") -> " + confPath);
+            Log.d("VkBasalt", "Wrote ReShade loadout conf (" + chain + ") -> " + confPath);
             return confPath;
         } catch (Exception e) {
             Log.e("VkBasalt", "Failed to write ReShade vkBasalt.conf", e);
@@ -1418,70 +1453,170 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     // Seed the in-game ReShade drawer controls from the resolved launch config. Runs in setupUI
-    // (after container/shortcut are assigned). enableOnLaunch=True, so a selected effect is ON.
+    // (after container/shortcut are assigned). enableOnLaunch=True, so the loadout is ON at launch;
+    // each effect's own <ei>_enabled flag decides which of them present.
     private void seedReshadeDrawerState(XServerDialogState ds) {
         boolean supported = reshadeSupported();
         ds.setReshadeSupported(supported);
-        String effectName = resolvedReshadeEffect();
-        boolean hasEffect = supported && effectName != null && !effectName.equals("None") && !effectName.isEmpty();
-        if (!hasEffect) {
-            ds.setReshadeEffectName("None");
-            ds.setReshadeEnabled(false);
-            ds.setReshadeParams(new ArrayList<>());
-            ds.setReshadeValues(new HashMap<>());
-            return;
+
+        ResolvedReshade rr = supported ? resolveReshade() : null;
+        java.util.ArrayList<com.winlator.star.ui.ReshadeLoadoutItem> items = new java.util.ArrayList<>();
+        if (rr != null) {
+            for (com.winlator.star.reshade.ReshadeLoadout.Entry entry : rr.loadout) {
+                com.winlator.star.reshade.ReshadeManager.ReshadeEffect effect =
+                    com.winlator.star.reshade.ReshadeManager.findEffect(this, entry.name);
+                if (effect == null) continue; // only tune effects actually present in the drop-in folder
+                // Values: nested per-effect JSON (or migrated flat legacy) layered over the .fx defaults.
+                org.json.JSONObject saved = com.winlator.star.reshade.ReshadeLoadout.paramsForEffect(
+                        rr.paramsJson, effect.name, rr.nested, rr.legacyEffect);
+                HashMap<String, Float> values = new HashMap<>();
+                for (com.winlator.star.reshade.ReshadeManager.ReshadeParam p : effect.params) {
+                    com.winlator.star.reshade.ReshadeManager.seedValues(p, saved, values);
+                }
+                items.add(new com.winlator.star.ui.ReshadeLoadoutItem(
+                        effect.name, entry.enabled, effect.params, values));
+            }
         }
-        com.winlator.star.reshade.ReshadeManager.ReshadeEffect effect =
-            com.winlator.star.reshade.ReshadeManager.findEffect(this, effectName);
-        ds.setReshadeEffectName(effect != null ? effect.name : "None");
-        ds.setReshadeEnabled(effect != null);
-        if (effect == null) {
-            ds.setReshadeParams(new ArrayList<>());
-            ds.setReshadeValues(new HashMap<>());
-            return;
-        }
-        ds.setReshadeParams(effect.params);
-        // Values: saved JSON (shortcut override -> container default) layered over the .fx defaults.
-        // seedValues handles the value-map key scheme (one entry per uniform; per-component for COLOR).
-        org.json.JSONObject saved = null;
-        String raw = resolvedReshadeParams();
-        if (raw != null && !raw.isEmpty()) {
-            try { saved = new org.json.JSONObject(raw); } catch (JSONException ignored) {}
-        }
-        HashMap<String, Float> values = new HashMap<>();
-        for (com.winlator.star.reshade.ReshadeManager.ReshadeParam p : effect.params) {
-            com.winlator.star.reshade.ReshadeManager.seedValues(p, saved, values);
-        }
-        ds.setReshadeValues(values);
+        ds.setReshadeMode(rr != null ? rr.mode : com.winlator.star.reshade.ReshadeLoadout.MODE_SOLO);
+        ds.setReshadeLoadout(items);
+        // Master (whole-chain) on/off: ON whenever there's something to show, unless the user
+        // explicitly turned ReShade off in-game last session (persisted rr.masterEnabled == false).
+        ds.setReshadeMasterEnabled(!items.isEmpty() && (rr == null || rr.masterEnabled));
     }
 
-    // SINGLE pluggable seam for ReShade live-apply. For NOW it persists the new uniform values to
-    // the active store and rewrites the merged vkBasalt.conf, so the change is correct on the next
-    // launch (the bundled vkBasalt has no config-watch — see RESHADE_STEP3_PLAN.md §5). When the
-    // live mechanism lands (a vkBasalt config-watch patch for live uniforms, and/or an X11 Home-key
-    // inject for live on/off), wire it HERE — this is the only place the rest of the feature calls.
-    private void applyReshadeLive(boolean enabled, Map<String, Float> values) {
+    // SINGLE pluggable seam for ReShade live-apply. Persists the full drawer loadout snapshot
+    // (per-effect enabled + per-effect values + mode + master on/off) to the active store, then
+    // rewrites the merged vkBasalt.conf. Our patched libvkbasalt watches the conf mtime and reloads
+    // enableOnLaunch (whole-chain present) + each <ei>_enabled flag + the uniform values WITHOUT a
+    // recompile, so the change takes effect live. restage=false: the effect folders are already
+    // staged from launch, so we only rewrite the conf.
+    private void applyReshadeLive(boolean masterEnabled, String mode,
+                                  List<com.winlator.star.ui.ReshadeLoadoutItem> items) {
         try {
-            org.json.JSONObject json = new org.json.JSONObject();
-            if (values != null) {
-                for (Map.Entry<String, Float> e : values.entrySet())
-                    json.put(e.getKey(), (double) e.getValue());
+            java.util.ArrayList<com.winlator.star.reshade.ReshadeLoadout.Entry> entries = new java.util.ArrayList<>();
+            org.json.JSONObject nestedParams = new org.json.JSONObject();
+            if (items != null) {
+                for (com.winlator.star.ui.ReshadeLoadoutItem it : items) {
+                    entries.add(new com.winlator.star.reshade.ReshadeLoadout.Entry(it.getName(), it.getEnabled()));
+                    Map<String, Float> vals = it.getValues();
+                    if (vals != null && !vals.isEmpty()) {
+                        org.json.JSONObject effJson = new org.json.JSONObject();
+                        for (Map.Entry<String, Float> e : vals.entrySet())
+                            effJson.put(e.getKey(), (double) e.getValue());
+                        nestedParams.put(it.getName(), effJson);
+                    }
+                }
             }
-            String jsonStr = json.length() == 0 ? null : json.toString();
-            if (shortcut != null) {
-                shortcut.putExtra("reshadeParams", jsonStr);
+            String loadoutJson = com.winlator.star.reshade.ReshadeLoadout.serialize(entries);
+            String paramsJson = nestedParams.length() == 0 ? null : nestedParams.toString();
+            String modeStr = com.winlator.star.reshade.ReshadeLoadout.normalizeMode(mode);
+            // Keep the legacy single field roughly coherent for any old reader (new resolution
+            // prefers reshadeLoadout when present).
+            String firstEffect = entries.isEmpty() ? "None" : entries.get(0).name;
+
+            // Persist to the SAME source resolveReshade() will read next launch (the authoritative
+            // owner for this session): the shortcut only when it already owns reshade as a unit,
+            // otherwise the container. Writing by the same shortcutOwnsReshade() discriminator keeps
+            // write-target == read-source, so an in-game change (loadout/mode/params/enabled + the
+            // master switch) is restored on relaunch instead of reverting to the pre-launch config.
+            if (shortcutOwnsReshade()) {
+                shortcut.putExtra("reshadeLoadout", entries.isEmpty() ? null : loadoutJson);
+                shortcut.putExtra("reshadeMode", modeStr);
+                shortcut.putExtra("reshadeParams", paramsJson);
+                shortcut.putExtra("reshadeEffect", firstEffect);
+                shortcut.putExtra("reshadeMasterEnabled", masterEnabled ? null : "0");
                 shortcut.saveData();
             } else if (container != null) {
-                container.setReshadeParams(jsonStr);
+                container.setReshadeLoadout(entries.isEmpty() ? null : loadoutJson);
+                container.setReshadeMode(modeStr);
+                container.setReshadeParams(paramsJson);
+                container.setReshadeEffect(firstEffect);
+                container.setReshadeMasterEnabled(masterEnabled);
                 container.saveData();
             }
         } catch (JSONException ignored) {}
-        // Rewrite the conf so a relaunch reflects the new values (resolvedReshadeParams now reads
-        // the freshly-saved JSON) AND so the live config-watch in our patched libvkbasalt picks up
-        // both the new uniform values and the on/off state. `enabled` -> enableOnLaunch: toggling
-        // the drawer "Effect" switch off writes enableOnLaunch=False, which the layer reloads into
-        // presentEffect=false (passthrough) on the next frame -> the effect actually turns off.
-        writeVkBasaltConfig(enabled);
+        // masterEnabled -> enableOnLaunch: the drawer "ReShade" master switch off writes
+        // enableOnLaunch=False (whole-chain passthrough); per-effect flags ride <ei>_enabled.
+        writeVkBasaltConfig(masterEnabled);
+
+        // The conf is now committed (mtime bumped -> the patched libvkbasalt hot-reloads it). In the
+        // freeze-frame preview mode (Live preview OFF) this is where a committed change enters/pulses
+        // the preview-pause so the new look is revealed on a frozen scene.
+        handleReshadePreviewChange();
+    }
+
+    // ─────────────────────────── ReShade freeze-frame preview ───────────────────────────
+    // Called after each COMMITTED ReShade change (effect toggle or slider release -> applyReshadeLive).
+    // Live preview ON: no-op (the game keeps running, changes apply live). OFF: freeze the game on the
+    // FIRST change (SIGSTOP + pause box), and PULSE on every subsequent change (brief SIGCONT so 1–2
+    // frames render the change, then SIGSTOP again). Runs on the drawer's UI thread.
+    private void handleReshadePreviewChange() {
+        if (reshadeLivePreview) return;
+        if (isPaused) {
+            // Already frozen (this preview, or a manual Pause) -> reveal the change with a brief pulse.
+            reshadePreviewPaused = true;
+            pulseReshadePreview();
+        } else {
+            // First committed change while the game was running -> freeze. The change was applied to
+            // the live conf while still running, so the frames just before the freeze already show it.
+            reshadePreviewPaused = true;
+            setPausedState(true);
+        }
+    }
+
+    // One brief resume so the committed ReShade change actually renders, then re-freeze. Counts real
+    // presented frames via the PresentExtension observer (N=RESHADE_PULSE_TARGET_PRESENTS); a time
+    // fallback re-freezes if the game isn't presenting (no present callback fires). Serialized so
+    // overlapping changes can't stack SIGCONT/SIGSTOP pairs. Never flips isPaused (the UI stays
+    // "frozen" the whole time) — the pulse is purely at the process-signal level.
+    private void pulseReshadePreview() {
+        if (reshadePulseInProgress) return;   // debounce: a pulse is already running
+        reshadePulseInProgress = true;
+
+        final com.winlator.star.xserver.extensions.PresentExtension pe = (xServer != null)
+            ? xServer.getExtension(com.winlator.star.xserver.extensions.PresentExtension.MAJOR_OPCODE)
+            : null;
+
+        final java.util.concurrent.atomic.AtomicBoolean finished =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+        final Runnable[] refreezeHolder = new Runnable[1];
+        final Runnable refreeze = () -> {
+            if (!finished.compareAndSet(false, true)) return;   // present-callback vs fallback: run once
+            if (pe != null) pe.setPresentListener(null);
+            handler.removeCallbacks(refreezeHolder[0]);
+            // Re-freeze only if we're still meant to be paused (tap-to-resume may have won the race).
+            if (isPaused) ProcessHelper.pauseAllWineProcesses();
+            reshadePulseInProgress = false;
+        };
+        refreezeHolder[0] = refreeze;
+
+        if (pe != null) {
+            final java.util.concurrent.atomic.AtomicInteger presents =
+                new java.util.concurrent.atomic.AtomicInteger(0);
+            pe.setPresentListener(() -> {
+                if (presents.incrementAndGet() >= RESHADE_PULSE_TARGET_PRESENTS)
+                    runOnUiThread(refreeze);   // marshal back to the handler thread
+            });
+        }
+        // Let the game run so it presents the new look, with a time-based safety net.
+        ProcessHelper.resumeAllWineProcesses();
+        handler.postDelayed(refreeze, RESHADE_PULSE_FALLBACK_MS);
+    }
+
+    // Single source of truth for the frozen/paused state. Suspends/resumes the guest, clears the
+    // preview-ownership flag on any resume, and mirrors to BOTH Compose holders (the drawer Pause
+    // button + the centered pause box). Everything that pauses/resumes (manual Pause, the ReShade
+    // preview, the box tap, lifecycle) routes through here so the flag never disagrees with reality.
+    private void setPausedState(boolean paused) {
+        isPaused = paused;
+        if (paused) {
+            ProcessHelper.pauseAllWineProcesses();
+        } else {
+            ProcessHelper.resumeAllWineProcesses();
+            reshadePreviewPaused = false;
+        }
+        XServerDrawerState.INSTANCE.setIsPaused(paused);
+        XServerDialogState.INSTANCE.setPaused(paused);
     }
 
     private void savePlaytimeData() {
@@ -1515,6 +1650,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void exit() {
+        // A frozen (SIGSTOP'd) guest can't act on the SIGTERM below — resume before tearing down so
+        // graceful termination isn't stuck waiting on a suspended process (any pending pulse aside).
+        reshadePulseInProgress = false;
+        ProcessHelper.resumeAllWineProcesses();
         installerWatchHandler.removeCallbacks(installerWatchRunnable);
         gameExitWatchHandler.removeCallbacks(gameExitWatchRunnable);
         stopDxApiDetection();
@@ -2319,7 +2458,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // because `container`/`shortcut` are assigned by now (seeding in onCreate would capture a
         // null effect). Live-apply rides the single onReshadeApply -> applyReshadeLive seam.
         seedReshadeDrawerState(ds);
-        ds.onReshadeApply = (enabled, values) -> applyReshadeLive(enabled, values);
+        ds.onReshadeApply = (masterEnabled, mode, items) -> applyReshadeLive(masterEnabled, mode, items);
+
+        // "Live preview" toggle — persisted global flag (default OFF = freeze-frame + pulse preview).
+        reshadeLivePreview = preferences.getBoolean("reshade_live_preview", false);
+        ds.setReshadeLivePreview(reshadeLivePreview);
+        ds.onReshadeLivePreviewChange = (enabled) -> {
+            reshadeLivePreview = enabled;
+            preferences.edit().putBoolean("reshade_live_preview", enabled).apply();
+            // Turning Live preview ON while a preview freeze is active: let the game run again.
+            if (enabled && reshadePreviewPaused) runOnUiThread(() -> setPausedState(false));
+        };
+        // Tapping the centered pause box = full resume (covers preview pause AND manual pause).
+        ds.onRequestResume = () -> runOnUiThread(() -> setPausedState(false));
 
         // Input Controls state (renderer-independent: controller profiles + vibration work on
         // BOTH the GL and Vulkan host renderers, so this must run before the GL-only guard below.
@@ -3330,16 +3481,64 @@ return true;
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
     }
 
-    // ReShade effect selection: shortcut overrides the container default. "None"/empty -> no effect.
-    private String resolvedReshadeEffect() {
-        if (container == null) return "None";
-        return shortcut != null ? shortcut.getExtra("reshadeEffect", container.getReshadeEffect()) : container.getReshadeEffect();
+    // Resolved ReShade config for this launch: the loadout (ordered effects + per-effect enabled),
+    // the solo/stack mode, and the raw per-effect params JSON (nested, or migrated flat legacy).
+    private static class ResolvedReshade {
+        java.util.List<com.winlator.star.reshade.ReshadeLoadout.Entry> loadout;
+        String mode;
+        String paramsJson;   // nested {"<effect>":{uniform:value}} when nested==true, else flat legacy
+        boolean nested;      // whether a reshadeLoadout array was the source (params are nested)
+        String legacyEffect; // for flat-params migration
+        boolean masterEnabled = true; // whole-chain enableOnLaunch, persisted from the drawer master switch
     }
 
-    // Per-uniform value overrides (JSON {name: value}); shortcut wins over the container default.
-    private String resolvedReshadeParams() {
-        if (container == null) return "";
-        return shortcut != null ? shortcut.getExtra("reshadeParams", container.getReshadeParams()) : container.getReshadeParams();
+    // A shortcut OWNS the reshade config as a unit once it carries any reshade extra (the new loadout
+    // array or the legacy single effect); until then the container's config is authoritative. This is
+    // the SINGLE discriminator used by BOTH resolveReshade() (which source to read) and the live-apply
+    // persist (which source to write) so a write always lands where the next launch will read it.
+    private boolean shortcutOwnsReshade() {
+        return shortcut != null
+                && (shortcut.getExtra("reshadeLoadout", null) != null
+                    || shortcut.getExtra("reshadeEffect", null) != null);
+    }
+
+    // ReShade selection resolution. The shortcut OWNS the whole reshade config (loadout + mode +
+    // params) when it sets any reshade extra (reshadeLoadout or the legacy reshadeEffect); otherwise
+    // the container's is used. Resolving as a unit (rather than per-key) keeps the loadout + its
+    // params coherent and migrates legacy single-effect saves transparently (ReshadeLoadout.parse).
+    private ResolvedReshade resolveReshade() {
+        ResolvedReshade r = new ResolvedReshade();
+        if (container == null) {
+            r.loadout = new java.util.ArrayList<>();
+            r.mode = com.winlator.star.reshade.ReshadeLoadout.MODE_SOLO;
+            r.paramsJson = null;
+            r.nested = false;
+            r.legacyEffect = "None";
+            return r;
+        }
+        String loadoutJson, mode, paramsJson, legacyEffect;
+        boolean shortcutOwns = shortcutOwnsReshade();
+        if (shortcutOwns) {
+            loadoutJson  = shortcut.getExtra("reshadeLoadout", null);
+            mode         = shortcut.getExtra("reshadeMode", "solo");
+            paramsJson   = shortcut.getExtra("reshadeParams", null);
+            legacyEffect = shortcut.getExtra("reshadeEffect", "None");
+            r.masterEnabled = !shortcut.getExtra("reshadeMasterEnabled", "1").equals("0");
+        } else {
+            loadoutJson  = container.getReshadeLoadout();
+            mode         = container.getReshadeMode();
+            paramsJson   = container.getReshadeParams();
+            legacyEffect = container.getReshadeEffect();
+            r.masterEnabled = container.getReshadeMasterEnabled();
+        }
+        r.nested = loadoutJson != null && !loadoutJson.isEmpty();
+        r.loadout = com.winlator.star.reshade.ReshadeLoadout.parse(loadoutJson, legacyEffect);
+        r.mode = com.winlator.star.reshade.ReshadeLoadout.normalizeMode(mode);
+        r.paramsJson = paramsJson;
+        r.legacyEffect = legacyEffect;
+        // Solo safety: never light up two effects at once in solo mode.
+        com.winlator.star.reshade.ReshadeLoadout.enforceSolo(r.loadout, r.mode);
+        return r;
     }
 
     // ReShade only rides the guest-side Vulkan swapchain (DXVK/VKD3D via Turnip), so it's a no-op on
