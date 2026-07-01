@@ -605,9 +605,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
             boolean limOn  = s.getFpsLimiterEnabled().getValue();
             int   limitVal = s.getFpsLimit().getValue();   // remembered slider value, kept across on/off
             applyFpsLimit(limOn && limitVal > 0 ? limitVal : 0);
-            container.setFpsLimiterEnabled(limOn);
-            if (limitVal > 0) container.setFpsLimiterValue(limitVal);
-            container.saveData();
+            // Persist to the SAME owner the launch seed resolves from (resolvedFpsLimiter*). Writing the
+            // in-game toggle only to the container while a shortcut-launched game re-reads its (stale)
+            // shortcut extra next launch is why the limiter "resets every time you close the game"
+            // (issue #46). Mirror the ReShade owner-discriminator fix: write-target == read-source.
+            if (shortcut != null) {
+                shortcut.putExtra("fpsLimiterEnabled", limOn ? "1" : "0");
+                if (limitVal > 0) shortcut.putExtra("fpsLimiterValue", String.valueOf(limitVal));
+                shortcut.saveData();
+            } else {
+                container.setFpsLimiterEnabled(limOn);
+                if (limitVal > 0) container.setFpsLimiterValue(limitVal);
+                container.saveData();
+            }
         };
         // VRR / refresh-rate matching toggle. Persists to the container and re-votes the panel
         // refresh rate live (applyVrr). Independent of frame-gen; works on all 3 host renderers.
@@ -792,7 +802,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
         XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
         XServerDrawerState.INSTANCE.setFpsLimiterEnabled(fpsLimOn);
-        XServerDrawerState.INSTANCE.setFpsLimit(container.getFpsLimiterValue());
+        XServerDrawerState.INSTANCE.setFpsLimit(resolvedFpsLimiterValue());
         XServerDrawerState.INSTANCE.setMatchRefreshRate(resolvedMatchRefreshRate());
         XServerDrawerState.INSTANCE.setVrrSupported(
             com.winlator.star.widget.XServerView.isDisplayVrrCapable(getWindowManager().getDefaultDisplay()));
@@ -2146,7 +2156,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Standalone FPS limiter (guest-side, via the X11 Present extension): apply the resolved
         // per-game/container value up front, independent of the frame-gen engine. The in-game toggle
         // (onFpsLimitChange) updates it live afterwards.
-        applyFpsLimit(resolvedFpsLimiterEnabled() ? container.getFpsLimiterValue() : 0);
+        applyFpsLimit(resolvedFpsLimiterEnabled() ? resolvedFpsLimiterValue() : 0);
 
         // Apply the container's advanced Vulkan present settings (native rendering, present mode,
         // filter, swap R/B). Source of truth = the container's dedicated renderer* fields. The old
@@ -3599,6 +3609,20 @@ return true;
             return shortcut.getExtra("fpsLimiterEnabled", container.isFpsLimiterEnabled() ? "1" : "0").equals("1");
         }
         return container.isFpsLimiterEnabled();
+    }
+
+    // Per-game override for the limiter cap value (shortcut wins over the container default), so the
+    // value seed reads from the SAME owner onFpsLimitChange writes to. Mirrors resolvedFpsLimiterEnabled().
+    private int resolvedFpsLimiterValue() {
+        if (shortcut != null) {
+            try {
+                return Integer.parseInt(shortcut.getExtra("fpsLimiterValue",
+                    String.valueOf(container.getFpsLimiterValue())));
+            } catch (NumberFormatException e) {
+                return container.getFpsLimiterValue();
+            }
+        }
+        return container.getFpsLimiterValue();
     }
 
     // Per-game override for VRR / refresh-rate matching (shortcut wins over the container default).

@@ -11,3 +11,6 @@
 
 
 *.tar.zst
+
+# local agent worktrees (never commit)
+.claude/worktrees/
