@@ -541,3 +541,10 @@ goldberg.tzst (tier folders at root, essentials only) SIZE=35938867 MD5=BC48B103
 (round-trip identical). Repo The412Banner/winlator-contents: release goldberg-v1 asset goldberg.tzst
 (HTTP 200) + goldberg.json at repo root main. ColdClientLoader.ini = standard gbe_fork keys (verified).
 GATE: NOT device-proven (patch+launch unexercised). Pushing branch + CI build for device test.
+
+## 2026-07-01 (cont.) — branch consolidation
+Deleted feat/steam-store-compose (local + remote). Verified it had ZERO unique commits — the
+device-proven store rebuild (M3 restyle + Compose container picker + result dialog + toast fix)
+is fully contained in feat/steam-goldberg-patcher, which was branched off it (strict superset:
+store work + 2 Goldberg commits). Single line forward = feat/steam-goldberg-patcher. No code lost.
+NOT merged to main; Goldberg still device-gating (CI build 28561426643).
