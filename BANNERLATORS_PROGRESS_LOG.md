@@ -524,3 +524,20 @@ shortcut-write/launch time (coordinates w/ StarLaunchBridge). Tiers 1-2 = pure f
 change. Bundle a pinned Goldberg (gbe_fork) in app assets, extract to imagefs on first use (turnkey,
 don't depend on user's Winlator/Games/Goldberg folder). Sequenced on branch stacked on
 feat/steam-store-compose (picker work still device-gating build 2 run 28560163675).
+
+## 2026-07-01 (cont.) — Goldberg auto-patch BUILT + catalog PUBLISHED
+Engineer built the full feature on feat/steam-goldberg-patcher (commit 4563ae2, off device-proven
+feat/steam-store-compose). Kotlin+Java compile GREEN. Two-pass: assets-bundle first, then reworked
+to DOWNLOAD-ON-DEMAND per user request (mirror ReShade). GoldbergComponent.kt: goldberg.json →
+Downloader.downloadFile → UPPERCASE-MD5 → TarCompressorUtils.extract(ZSTD) → {filesDir}/imagefs/
+opt/goldberg/ (installed = dir exists, marker regular/x64/steam_api64.dll). Detail page shows
+"Download Steam Emulator (~size)" until installed, then tiers Off/Regular/Experimental/ColdClient
+on every game page (one global DL). Per-game mode in SteamPrefs goldberg_mode_<appId>.
+GoldbergPatcher.kt: PE-header arch detect, interface-string scan→steam_interfaces.txt+steam_appid.txt,
+restore-from-.bak-first golden rule, resolveLaunchExe (ColdClient→loader exe), honest online-only
+UI caveat.
+PACKAGE PUBLISHED (LIVE): pulled exact gbe_fork off device (byte-verified), rebuilt clean combined
+goldberg.tzst (tier folders at root, essentials only) SIZE=35938867 MD5=BC48B103AD3B067D3ED7CDFDAF728A4A
+(round-trip identical). Repo The412Banner/winlator-contents: release goldberg-v1 asset goldberg.tzst
+(HTTP 200) + goldberg.json at repo root main. ColdClientLoader.ini = standard gbe_fork keys (verified).
+GATE: NOT device-proven (patch+launch unexercised). Pushing branch + CI build for device test.
