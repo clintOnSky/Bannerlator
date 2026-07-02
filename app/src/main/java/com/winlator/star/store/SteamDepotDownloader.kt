@@ -56,13 +56,17 @@ object SteamDepotDownloader {
     private var debugLogFile: File? = null
     val debugLogPath: String get() = debugLogFile?.absolutePath ?: "(not initialized)"
 
-    private fun initDebugLog(ctx: Context) {
+    private fun initDebugLog(ctx: Context, truncate: Boolean = true) {
         try {
             val dir = ctx.getExternalFilesDir(null)
             if (dir != null) {
                 debugLogFile = File(dir, "steam_debug.txt")
-                BufferedWriter(FileWriter(debugLogFile!!, false)).use { w ->
-                    w.write("=== Steam DepotDownloader Debug Log (JavaSteam native) ===\n")
+                // On a session-recovery retry (truncate=false) keep the prior attempt's log so the
+                // failure + recovery narrative survives instead of being wiped by the resume.
+                BufferedWriter(FileWriter(debugLogFile!!, !truncate)).use { w ->
+                    val hdr = if (truncate) "=== Steam DepotDownloader Debug Log (JavaSteam native) ==="
+                              else "=== Retry attempt (session recovery) ==="
+                    w.write("$hdr\n")
                     w.write("Engine: JavaSteam DepotDownloader (Ktor CIO)\n")
                     w.write("Time: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}\n\n")
                 }
@@ -156,7 +160,7 @@ object SteamDepotDownloader {
         attempt: Int = 0,
     ) {
         activeDownloads[appId] = Unit
-        initDebugLog(ctx)
+        initDebugLog(ctx, truncate = attempt == 0)
         dlog("=== Starting install: appId=$appId ===")
 
         val repo = SteamRepository.getInstance()
