@@ -94,6 +94,10 @@ class MainActivity : AppCompatActivity() {
         const val EDIT_INPUT_CONTROLS_REQUEST_CODE: Byte = 3
         const val OPEN_DIRECTORY_REQUEST_CODE: Byte = 4
         const val OPEN_IMAGE_REQUEST_CODE: Byte = 5
+
+        /** String extra: a Screen route to open (e.g. Screen.Games.route). Used by
+         *  the store activities' "Open Shortcuts" action to deep-link back here. */
+        const val EXTRA_OPEN_SCREEN = "open_screen"
         @JvmField val CONTAINER_PATTERN_COMPRESSION_LEVEL: Byte = 9
         @JvmField var PACKAGE_NAME: String = ""
     }
@@ -111,6 +115,10 @@ class MainActivity : AppCompatActivity() {
 
     private val showAllFilesDialog = mutableStateOf(false)
     private val showAboutDialog = mutableStateOf(false)
+
+    // Route requested via EXTRA_OPEN_SCREEN on a relaunch (onNewIntent); consumed
+    // by AppShell, which navigates to it and clears it.
+    private val pendingRoute = mutableStateOf<String?>(null)
 
     private val openImageLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -149,7 +157,9 @@ class MainActivity : AppCompatActivity() {
             editInputControls -> Screen.InputControls.route
             else -> {
                 val selectedMenuItemId = intent.getIntExtra("selected_menu_item_id", 0)
-                menuItemIdToRoute(selectedMenuItemId) ?: Screen.Games.route
+                validRouteOrNull(intent.getStringExtra(EXTRA_OPEN_SCREEN))
+                    ?: menuItemIdToRoute(selectedMenuItemId)
+                    ?: Screen.Games.route
             }
         }
 
@@ -180,6 +190,8 @@ class MainActivity : AppCompatActivity() {
                 Box(modifier = Modifier.fillMaxSize()) {
                     AppShell(
                         startRoute = startRoute,
+                        pendingRoute = pendingRoute.value,
+                        onPendingRouteConsumed = { pendingRoute.value = null },
                         editInputControls = editInputControls,
                         selectedInputProfileId = selectedProfileId,
                         showAllFilesDialog = showAllFilesDialog.value,
@@ -273,6 +285,19 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // Deep-link from the store activities (CLEAR_TOP|SINGLE_TOP relaunch).
+        validRouteOrNull(intent.getStringExtra(EXTRA_OPEN_SCREEN))?.let {
+            pendingRoute.value = it
+        }
+    }
+
+    /** Only accepts known drawer routes so a bad extra can't crash navigation. */
+    private fun validRouteOrNull(route: String?): String? =
+        route?.takeIf { r -> Screen.drawerItems.any { it.route == r } }
+
     private fun menuItemIdToRoute(itemId: Int): String? = when (itemId) {
         R.id.main_menu_containers -> Screen.Containers.route
         R.id.main_menu_shortcuts  -> Screen.Games.route
@@ -287,6 +312,8 @@ class MainActivity : AppCompatActivity() {
 @Composable
 private fun AppShell(
     startRoute: String,
+    pendingRoute: String?,
+    onPendingRouteConsumed: () -> Unit,
     editInputControls: Boolean,
     selectedInputProfileId: Int,
     showAllFilesDialog: Boolean,
@@ -320,6 +347,18 @@ private fun AppShell(
                     bannerUpdate = info
                 }
             }
+        }
+    }
+
+    // Navigate to a route requested by a relaunch intent (store "Open Shortcuts").
+    LaunchedEffect(pendingRoute) {
+        if (pendingRoute != null) {
+            navController.navigate(pendingRoute) {
+                popUpTo(navController.graph.startDestinationId) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+            onPendingRouteConsumed()
         }
     }
 

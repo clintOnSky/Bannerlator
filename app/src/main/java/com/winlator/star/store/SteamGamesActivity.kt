@@ -64,6 +64,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.winlator.star.store.compose.AddResultDialog
+import com.winlator.star.store.compose.AddShortcutResult
+import com.winlator.star.store.compose.AddToShortcutsRequest
+import com.winlator.star.store.compose.ContainerPickerDialog
+import com.winlator.star.store.compose.openShortcutsScreen
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -78,6 +83,8 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
     private var isLoading by mutableStateOf(true)
     private var showSignOutDialog by mutableStateOf(false)
     private var showExePicker by mutableStateOf<SteamExePickerData?>(null)
+    private var addToShortcuts by mutableStateOf<AddToShortcutsRequest?>(null)
+    private var addResult by mutableStateOf<AddShortcutResult?>(null)
     private var viewMode by mutableStateOf("grid")
 
     private val imageCache = object : LruCache<Int, Bitmap>(4 * 1024 * 1024) {
@@ -142,10 +149,36 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
                         onDismiss = { showExePicker = null },
                         onSelected = { chosen ->
                             showExePicker = null
-                            StarLaunchBridge.addToLauncher(
-                                this@SteamGamesActivity, data.gameName, chosen, data.coverUrl
-                            )
+                            startAddToShortcuts(data.gameName, chosen, data.coverUrl)
                         },
+                    )
+                }
+
+                addToShortcuts?.let { req ->
+                    ContainerPickerDialog(
+                        gameName = req.gameName,
+                        containers = req.containers,
+                        onDismiss = { addToShortcuts = null },
+                        onSelected = { container ->
+                            addToShortcuts = null
+                            StarLaunchBridge.writeShortcutAsync(
+                                this@SteamGamesActivity, container,
+                                req.gameName, req.exePath, req.coverUrl,
+                            ) { success, message ->
+                                addResult = AddShortcutResult(req.gameName, success, message)
+                            }
+                        },
+                    )
+                }
+
+                addResult?.let { result ->
+                    AddResultDialog(
+                        result = result,
+                        onOpenShortcuts = {
+                            addResult = null
+                            openShortcutsScreen(this@SteamGamesActivity)
+                        },
+                        onDismiss = { addResult = null },
                     )
                 }
             }
@@ -242,7 +275,7 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
             val coverUrl = "https://shared.steamstatic.com/store_item_assets/steam/apps/${game.appId}/library_600x900.jpg"
 
             if (exeFiles.size == 1) {
-                runOnUiThread { StarLaunchBridge.addToLauncher(this, game.name, exeFiles[0].absolutePath, coverUrl) }
+                runOnUiThread { startAddToShortcuts(game.name, exeFiles[0].absolutePath, coverUrl) }
                 return@Thread
             }
             val candidates = exeFiles.map { it.absolutePath }
@@ -250,6 +283,13 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
                 showExePicker = SteamExePickerData(game.name, candidates, coverUrl)
             }
         }.start()
+    }
+
+    /** Compose add-to-shortcuts flow: load containers, then show the M3 picker. */
+    private fun startAddToShortcuts(gameName: String, exePath: String, coverUrl: String?) {
+        StarLaunchBridge.loadContainers(this) { containers ->
+            addToShortcuts = AddToShortcutsRequest(gameName, exePath, coverUrl, containers)
+        }
     }
 }
 

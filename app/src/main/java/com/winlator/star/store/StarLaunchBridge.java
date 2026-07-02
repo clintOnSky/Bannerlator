@@ -5,9 +5,12 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.util.TypedValue;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.winlator.star.container.Container;
@@ -62,6 +65,35 @@ public final class StarLaunchBridge {
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
+    /** Delivers the container list to the caller on the main thread. */
+    public interface ContainersCallback {
+        void onContainers(ArrayList<Container> containers);
+    }
+
+    /** Delivers a shortcut-write outcome to the caller on the main thread. */
+    public interface ResultCallback {
+        void onResult(boolean success, String message);
+    }
+
+    /**
+     * Loads the Wine container list on a worker thread and delivers it on the
+     * main thread. Never delivers null — failures deliver an empty list.
+     * Used by the Compose add-to-shortcuts flow (Steam store).
+     */
+    public static void loadContainers(Activity activity, ContainersCallback cb) {
+        Handler h = new Handler(Looper.getMainLooper());
+        new Thread(() -> {
+            ArrayList<Container> containers = null;
+            try {
+                containers = new ContainerManager(activity).getContainers();
+            } catch (Exception e) {
+                Log.e(TAG, "loadContainers failed", e);
+            }
+            ArrayList<Container> result = (containers != null) ? containers : new ArrayList<>();
+            h.post(() -> cb.onContainers(result));
+        }, "store-launcher-picker").start();
+    }
+
     /**
      * Show a container picker, write a shortcut, then download cover art.
      *
@@ -82,9 +114,8 @@ public final class StarLaunchBridge {
                 ArrayList<Container> containers = manager.getContainers();
 
                 if (containers == null || containers.isEmpty()) {
-                    h.post(() -> Toast.makeText(activity,
-                            "No Wine container found — create one first in the Containers screen.",
-                            Toast.LENGTH_LONG).show());
+                    h.post(() -> showToast(activity,
+                            "No Wine container found — create one first in the Containers screen."));
                     return;
                 }
 
@@ -94,19 +125,19 @@ public final class StarLaunchBridge {
                     names[i] = (n != null && !n.isEmpty()) ? n : "Container " + (i + 1);
                 }
 
+                ArrayList<Container> finalContainers = containers;
                 h.post(() -> new AlertDialog.Builder(activity)
                         .setTitle("Add \"" + gameName + "\" to…")
                         .setItems(names, (dialog, which) ->
-                                writeShortcut(activity, containers.get(which),
-                                        gameName, exePath, coverArtUrl, h))
+                                writeShortcut(activity, finalContainers.get(which),
+                                        gameName, exePath, coverArtUrl))
                         .setNegativeButton("Cancel", null)
                         .show());
 
             } catch (Exception e) {
                 Log.e(TAG, "addToLauncher failed", e);
-                h.post(() -> Toast.makeText(activity,
-                        "Error loading containers: " + e.getMessage(),
-                        Toast.LENGTH_LONG).show());
+                h.post(() -> showToast(activity,
+                        "Error loading containers: " + e.getMessage()));
             }
         }, "store-launcher-picker").start();
     }
@@ -118,27 +149,30 @@ public final class StarLaunchBridge {
         addToLauncher(activity, gameName, exePath, null);
     }
 
-    // ── Private helpers ────────────────────────────────────────────────────────
-
-    private static void writeShortcut(Activity activity,
-                                      Container container,
-                                      String gameName,
-                                      String exePath,
-                                      String coverArtUrl,
-                                      Handler h) {
+    /**
+     * Writes a .desktop shortcut (plus cover art) into {@code container} on a
+     * worker thread and reports the outcome via {@code cb} on the main thread.
+     * Same logic as the legacy toast path — callers decide how to surface the
+     * result (the Compose Steam flow shows an M3 dialog).
+     */
+    public static void writeShortcutAsync(Activity activity,
+                                          Container container,
+                                          String gameName,
+                                          String exePath,
+                                          String coverArtUrl,
+                                          ResultCallback cb) {
+        Handler h = new Handler(Looper.getMainLooper());
         new Thread(() -> {
             try {
                 File desktopDir = container.getDesktopDir();
                 if (desktopDir == null) {
-                    h.post(() -> Toast.makeText(activity,
-                            "Container desktop directory not found.",
-                            Toast.LENGTH_LONG).show());
+                    h.post(() -> cb.onResult(false,
+                            "Container desktop directory not found."));
                     return;
                 }
                 if (!desktopDir.exists() && !desktopDir.mkdirs()) {
-                    h.post(() -> Toast.makeText(activity,
-                            "Could not create container desktop directory.",
-                            Toast.LENGTH_LONG).show());
+                    h.post(() -> cb.onResult(false,
+                            "Could not create container desktop directory."));
                     return;
                 }
 
@@ -191,18 +225,56 @@ public final class StarLaunchBridge {
                     Log.d(TAG, "No cover art found for: " + gameName);
                 }
 
-                h.post(() -> Toast.makeText(activity,
+                h.post(() -> cb.onResult(true,
                         "\"" + gameName + "\" added to Shortcuts.\n"
-                                + "Open the side menu → Shortcuts to launch and configure it.",
-                        Toast.LENGTH_LONG).show());
+                                + "Open the side menu → Shortcuts to launch and configure it."));
 
             } catch (Exception e) {
                 Log.e(TAG, "writeShortcut failed for " + gameName, e);
-                h.post(() -> Toast.makeText(activity,
-                        "Failed to add shortcut: " + e.getMessage(),
-                        Toast.LENGTH_LONG).show());
+                h.post(() -> cb.onResult(false,
+                        "Failed to add shortcut: " + e.getMessage()));
             }
         }, "store-write-shortcut").start();
+    }
+
+    // ── Private helpers ────────────────────────────────────────────────────────
+
+    /** Legacy path (GOG / Epic / Amazon): write the shortcut, toast the result. */
+    private static void writeShortcut(Activity activity,
+                                      Container container,
+                                      String gameName,
+                                      String exePath,
+                                      String coverArtUrl) {
+        writeShortcutAsync(activity, container, gameName, exePath, coverArtUrl,
+                (success, message) -> showToast(activity, message));
+    }
+
+    /**
+     * Shows a Toast with an explicit custom view. With targetSdk 28 toasts are
+     * app-rendered and inherit {@code android:colorBackground} from AppTheme,
+     * which this app forces to #000000 — the stock toast then draws black text
+     * on a black pill. An explicit white-on-dark-grey view stays readable.
+     */
+    private static void showToast(Context ctx, String message) {
+        float density = ctx.getResources().getDisplayMetrics().density;
+
+        TextView tv = new TextView(ctx);
+        tv.setText(message);
+        tv.setTextColor(0xFFFFFFFF);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        int padH = Math.round(16 * density);
+        int padV = Math.round(10 * density);
+        tv.setPadding(padH, padV, padH, padV);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xE6323232);
+        bg.setCornerRadius(16 * density);
+        tv.setBackground(bg);
+
+        Toast toast = new Toast(ctx.getApplicationContext());
+        toast.setDuration(Toast.LENGTH_LONG);
+        toast.setView(tv);
+        toast.show();
     }
 
     /**

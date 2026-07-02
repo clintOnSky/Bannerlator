@@ -52,6 +52,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.winlator.star.store.compose.AddResultDialog
+import com.winlator.star.store.compose.AddShortcutResult
+import com.winlator.star.store.compose.AddToShortcutsRequest
+import com.winlator.star.store.compose.ContainerPickerDialog
+import com.winlator.star.store.compose.openShortcutsScreen
 import com.winlator.star.ui.theme.WinlatorTheme
 import java.io.File
 import java.net.URL
@@ -100,6 +105,8 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
 
     private var showSpeedPicker by mutableStateOf(false)
     private var showExePicker by mutableStateOf<ExePickerDataGame?>(null)
+    private var addToShortcuts by mutableStateOf<AddToShortcutsRequest?>(null)
+    private var addResult by mutableStateOf<AddShortcutResult?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -156,10 +163,36 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                         onDismiss = { showExePicker = null },
                         onSelected = { chosen ->
                             showExePicker = null
-                            StarLaunchBridge.addToLauncher(
-                                this@SteamGameDetailActivity, data.gameName, chosen, data.coverUrl
-                            )
+                            startAddToShortcuts(data.gameName, chosen, data.coverUrl)
                         },
+                    )
+                }
+
+                addToShortcuts?.let { req ->
+                    ContainerPickerDialog(
+                        gameName = req.gameName,
+                        containers = req.containers,
+                        onDismiss = { addToShortcuts = null },
+                        onSelected = { container ->
+                            addToShortcuts = null
+                            StarLaunchBridge.writeShortcutAsync(
+                                this@SteamGameDetailActivity, container,
+                                req.gameName, req.exePath, req.coverUrl,
+                            ) { success, message ->
+                                addResult = AddShortcutResult(req.gameName, success, message)
+                            }
+                        },
+                    )
+                }
+
+                addResult?.let { result ->
+                    AddResultDialog(
+                        result = result,
+                        onOpenShortcuts = {
+                            addResult = null
+                            openShortcutsScreen(this@SteamGameDetailActivity)
+                        },
+                        onDismiss = { addResult = null },
                     )
                 }
             }
@@ -431,7 +464,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
             val coverUrl = "https://shared.steamstatic.com/store_item_assets/steam/apps/${g.appId}/library_600x900.jpg"
 
             if (exeFiles.size == 1) {
-                runOnUiThread { StarLaunchBridge.addToLauncher(this, g.name, exeFiles[0].absolutePath, coverUrl) }
+                runOnUiThread { startAddToShortcuts(g.name, exeFiles[0].absolutePath, coverUrl) }
                 return@Thread
             }
             val candidates = exeFiles.map { it.absolutePath }
@@ -439,6 +472,13 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                 showExePicker = ExePickerDataGame(g.name, candidates, coverUrl)
             }
         }.start()
+    }
+
+    /** Compose add-to-shortcuts flow: load containers, then show the M3 picker. */
+    private fun startAddToShortcuts(gameName: String, exePath: String, coverUrl: String?) {
+        StarLaunchBridge.loadContainers(this) { containers ->
+            addToShortcuts = AddToShortcutsRequest(gameName, exePath, coverUrl, containers)
+        }
     }
 
     private fun fmtSize(bytes: Long): String = when {
