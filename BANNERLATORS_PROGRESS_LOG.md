@@ -548,3 +548,12 @@ device-proven store rebuild (M3 restyle + Compose container picker + result dial
 is fully contained in feat/steam-goldberg-patcher, which was branched off it (strict superset:
 store work + 2 Goldberg commits). Single line forward = feat/steam-goldberg-patcher. No code lost.
 NOT merged to main; Goldberg still device-gating (CI build 28561426643).
+
+## 2026-07-01 (cont.) — Goldberg DEVICE-PARTIAL-PROVEN (screenshots)
+On the CI build (feat/steam-goldberg-patcher): download button appeared → fetched goldberg.json →
+downloaded the published goldberg.tzst → MD5-verified → extracted; result dialog "Steam Emulator
+installed. Pick a mode below." then the themed tier selector (Off/Regular/Experimental/Cold Client
+Loader) renders correctly on colorScheme with the honest online-only caveat copy. CONFIRMED on device:
+catalog delivery (my winlator-contents goldberg-v1 asset), global install gating, themed UI. STILL
+UNPROVEN: actual patch→launch (DLL swap gets a game past the Steam check) — needs a SINGLE-PLAYER
+Steam title (shown on Brawlhalla = online-only, so Error 3003 is server-side, not a patch validation).
