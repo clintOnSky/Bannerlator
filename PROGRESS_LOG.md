@@ -2,6 +2,25 @@
 
 ---
 
+## 2026-07-02 — 🐛→✅ Steam: QR-login downloads die ~1h in — fixed (recover from involuntary CM logoff)
+
+> **Symptom (user):** on the QR-login device, Steam depot downloads stop working ~1 hour after login; on a *different* device using **username/password** they run all day, session after session. (This device has only ever used QR — so the correlation is cross-device, not a clean same-device A/B.)
+> **Investigation** = native-steam-engineer audit of our `SteamRepository`/`SteamDepotDownloader` vs **GameNative** (`utkarshdalal/GameNative`, `SteamService.kt`), the reference the user asked to compare against.
+> **Root cause (code-certain):** `SteamRepository.onLoggedOff` (`:485`) was a **dead-end** — it set `loggedIn=false` and emitted `LoggedOut` with **no reconnect and no re-logon**, unlike `onDisconnected` (`:445`) which auto-recovers a socket drop. Depot downloads authenticate purely over the live CM session (manifest request codes, depot keys, CDN tokens — `SteamDepotDownloader.kt:256-371`), **not** a WebAPI bearer. So a clean mid-session CM **LoggedOff** (`EResult.Expired` ~1h into a QR-approved session; password sessions last longer or drop as a *recoverable* Disconnect) permanently stranded the session → in-flight download stalled → surfaced a bogus **"Unknown error."**
+> **Not the cause (ruled out):** `getAccessToken()` (`:892`) returns the refresh token ("doubles as bearer") but has **zero callers** — dead code, not in the download path. Both auth managers mint **identical SteamClient-audience** tokens (`persistentSession=true`), so QR-vs-password is **which callback fires**, not a token-audience misconfig. Our `LogOnDetails.setAccessToken(refreshToken)` pattern **matches GameNative** — correct, not misused.
+> **Verdict:** we were **MISSING recovery, not misusing an API.** GameNative's `onLoggedOff`→`reconnect()` (`SteamService.kt:3940-3970`) heals *both* login types with **no proactive token renewal** — pure reconnect+relogin from the stored refresh token.
+>
+> **Fix (branch `feat/steam-goldberg-patcher`, `4c6b202` + follow-up; ludashi Kotlin+Java compile GREEN):**
+> - **A — `SteamRepository.java` (the fix):** `onLoggedOff` now recovers an involuntary logoff by forcing a reconnect+relogin. `forceReconnect` flag lets `onDisconnected` proceed even though a self-initiated `disconnect()` reports `userInitiated=true` (the gotcha). Bounded by `logoffRecoveryAttempts < MAX_LOGOFF_RECOVERY(3)` (reset on `LoggedOn`) so a dead token can't loop. `loggingOut` flag (set by `logout()`, cleared on login/`saveSession`) keeps an intentional sign-out from being "recovered." `LoggedInElsewhere`/`LogonSessionReplaced` treated as terminal.
+> - **B — `SteamDepotDownloader.kt`:** `onDownloadFailed` now **defers** to the `finally` block, which awaits `ensureLoggedIn(30s)` and **retries the install once as a resume** (`attempt` param, `MAX_SESSION_RETRIES=2`) before surfacing failure — so a mid-download logoff reuses already-downloaded files instead of restarting. Plus `initDebugLog(truncate = attempt == 0)` so the retry **appends** rather than wiping `steam_debug.txt` — the failure+recovery narrative survives for on-device diagnosis.
+> - **C/D deliberately deferred:** optional proactive `generateAccessTokenForApp(refreshToken, allowRenewal=true)` renewal, and deleting the dead `getAccessToken()` — GameNative proves A+B suffice.
+>
+> **CI:** artifacts-only build **`28625813606`** (`build-artifacts.yml`, ref `feat/steam-goldberg-patcher`, label `steam-logoff-fix`) — the installable APK with the fix.
+> **Bridge note:** root bridge daemon (`127.0.0.1:8765`) was alive but this session's PRoot lacked the (boot-rotated) token + Termux-home client; recovered by writing the user-supplied token and speaking the raw `<token>\n<verb>\n` protocol directly (bare verbs `exec`/`ping`/`cat`, not the `--exec` client form). No historical logs survived to confirm the `EResult` (ring buffer aged out, no `steam_debug.txt`, app not running).
+> **⏳ GATE (device):** user will download + test the new build. Confirm a fresh **QR login + large download survives past ~1h** — watch `steam_debug.txt` / logcat `SteamRepo` for `Involuntary logoff (Expired) → forcing reconnect+relogin` then a resumed completion. Fix is correct regardless of the exact EResult.
+
+---
+
 ## 2026-07-01 — 🏁 RELEASED: Bannerlator 2.2.2 (stable, versionCode 37)
 
 > **GitHub release `2.2.2`** — tag `2.2.2` at `97c0e44`, **prerelease=false / make_latest** (now the Latest release), 3 flavor APKs + `update.json` reporting **versionCode 37 / versionName 2.2.2**. Built by `release.yml` run **`28520346738`** (success, from the main vc37 commit). **vc37 > pre1 vc36 > stable-2.2 vc35** so the in-app updater offers 2.2.2 to both stable and beta users.
