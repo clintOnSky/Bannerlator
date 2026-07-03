@@ -587,6 +587,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 writeLsfgConfig(mult >= 2 ? mult : 1, flow, dll.getAbsolutePath());
                 if (fgOn) container.setFrameGenMultiplier(mult);
                 container.setFrameGenFlowScale(flow);
+                container.setFrameGenSessionOn(fgOn && mult >= 2); // resume this on/off next launch
                 container.saveData();
                 // lsfg multiplier may have crossed the >=2 threshold -> re-evaluate the limiter
                 // guard (lsfgGovernsFps) so the cap steps aside / resumes without extra user action.
@@ -598,6 +599,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             writeBionicFgConfig(mult, flow, false, 0);
             if (fgOn) container.setFrameGenMultiplier(mult);
             container.setFrameGenFlowScale(flow);
+            container.setFrameGenSessionOn(fgOn && mult >= 2); // resume this on/off next launch
             container.saveData();
         };
         // Standalone FPS limiter: paces the X11 Present extension (delays IdleNotify) so the GAME
@@ -801,10 +803,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         boolean bionicFgActive = fgEnabled || lsfgOn;
         XServerDrawerState.INSTANCE.setBionicFgActive(bionicFgActive);
         XServerDrawerState.INSTANCE.setFrameGenEnabled(fgEnabled || lsfgOn);
-        // Frame gen ALWAYS starts OFF in-game (multiplier 0) regardless of the container setting.
-        // The layer is still loaded at launch (below), so the user can opt in per session from the
-        // FG drawer (live hot-reload). The persisted container multiplier is left untouched.
-        XServerDrawerState.INSTANCE.setFrameGenMultiplier(0);
+        // Restore the in-game frame-gen enable across sessions: if the user left FG multiplying,
+        // resume at the persisted multiplier; else start Off. Gated on bionicFgActive so the
+        // Edit-screen engine dropdown stays master — when no engine is selected the layer never
+        // loads and the persisted on-state is ignored (drawer shows the "enable it" placeholder).
+        XServerDrawerState.INSTANCE.setFrameGenMultiplier(
+                bionicFgActive ? resolvedFrameGenSessionMultiplier() : 0);
         XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
         XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
         XServerDrawerState.INSTANCE.setFpsLimiterEnabled(fpsLimOn);
@@ -2016,10 +2020,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // Wine /proc/self/exe is the loader, so the real exe name is unusable).
                 File losslessDll = new File(getFilesDir(), "lsfg-vk/Lossless.dll");
                 if (losslessDll.isFile()) {
-                    // Start in passthrough (multiplier 1 = frame gen off). ENABLE_LSFG still loads the
-                    // layer, so the FG drawer can enable it live in-session (the conf.toml mtime watch
-                    // re-applies the user's multiplier without a relaunch). Container value untouched.
-                    writeLsfgConfig(1, container.getFrameGenFlowScale(), losslessDll.getAbsolutePath());
+                    // Resume the persisted in-game multiplier (>=2 -> multiplying) or start in
+                    // passthrough (1 = off) when FG was left Off. ENABLE_LSFG loads the layer either
+                    // way, so the FG drawer can still retune live (conf.toml mtime watch re-applies).
+                    int fgMult = resolvedFrameGenSessionMultiplier();
+                    writeLsfgConfig(fgMult >= 2 ? fgMult : 1, container.getFrameGenFlowScale(), losslessDll.getAbsolutePath());
                     File lsfgConf = new File(imageFs.home_path, ".config/lsfg-vk/conf.toml");
                     envVars.put("ENABLE_LSFG", "1");
                     envVars.put("LSFG_CONFIG", lsfgConf.getAbsolutePath());
@@ -2034,8 +2039,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 boolean fgOn = resolvedFrameGenEngine().equals("bionic");
                 if (fgOn) {
                     envVars.put("BIONIC_FG_ENABLE", "1");
+                    // Resume the persisted in-game multiplier (0 stays Off; the layer still loads so
+                    // the drawer can enable it live via conf.toml hot-reload).
                     writeBionicFgConfig(
-                            0,
+                            resolvedFrameGenSessionMultiplier(),
                             container.getFrameGenFlowScale(),
                             false,
                             0);
@@ -3767,6 +3774,13 @@ return true;
 
     private String resolvedFrameGenEngine() {
         return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
+    }
+
+    // The multiplier frame gen should start at this launch: the persisted value if the user left FG
+    // on, else 0 (Off). Callers gate on an engine actually being selected (bionicFgActive) so the
+    // Edit-screen engine dropdown stays the master switch.
+    private int resolvedFrameGenSessionMultiplier() {
+        return container != null && container.isFrameGenSessionOn() ? container.getFrameGenMultiplier() : 0;
     }
 
     // Resolved ReShade config for this launch: the loadout (ordered effects + per-effect enabled),
