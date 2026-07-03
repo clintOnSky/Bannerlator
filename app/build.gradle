@@ -131,8 +131,8 @@ android {
     productFlavors {
         standard {
             dimension "version"
-            applicationId "com.winlator.banner"
-            resValue "string", "app_name", "Bannerlator Bionic"
+            applicationId "com.winlator.sky"
+            resValue "string", "app_name", "Skylator Bionic"
         }
         ludashi {
             dimension "version"
