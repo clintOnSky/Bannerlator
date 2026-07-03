@@ -9,6 +9,17 @@
 > **CI:** artifacts-only build **`28681946617`** (`build-artifacts.yml`, ref `feat/steam-goldberg-patcher` tip `12166b3`, label `steam-logoff-fix`) — 3 flavors, no tag/release. User grabs the APK himself (no device push requested).
 > **🎮 Goldberg milestone (device):** user **downloaded + installed Portal 2 (single-player Steam title) via the store, then applied the Goldberg patch successfully.** First real single-player validation of the **patch-apply** step — the exact gate Brawlhalla (online-only, Error 3003) could never clear. ⏳ still to confirm explicitly: patched Portal 2 **boots into gameplay** past the Steam check (apply succeeded; in-game boot not yet reported).
 > **Net state:** QR >1h survival test **deprioritized/parked** (not abandoned; playbook preserved). Focus = Goldberg tier ladder + launch-proof. Still on `feat/steam-goldberg-patcher`, **NOT merged**.
+>
+> **✅✅ UPDATE (same day): Portal 2 patched → BOOTED INTO GAMEPLAY on device.** The full end-to-end Goldberg loop is now proven on real hardware: store download → shared prep → DLL swap (**Regular** tier) → launch past the Steam check → in-game. Clears the last unknown (Brawlhalla could never validate it — online-only Error 3003).
+>
+> **Where the Goldberg branch stands — code is FEATURE-COMPLETE, only validation + shipping remain** (no TODOs/FIXMEs across the 4 Goldberg files; all 3 tiers + `resolveLaunchExe` + restore + PE-arch-detect implemented, compiling green):
+> 1. **Tier-ladder breadth (device):** only **Regular** proven. **Experimental** (adds `steamclient(64).dll`) and **Cold Client Loader** (restores orig api + `steamclient_experimental` loader + generated `ColdClientLoader.ini` + **shortcut Exec repoint** to `steamclient_loader_x64.exe`, wired at shortcut-add `SteamGameDetailActivity.kt:538`) are untested. ColdClient is riskiest — changes the launch command and asks the user to re-add the game to Shortcuts. Needs a title that fails Regular to exercise it.
+> 2. **Restore/Off flow (device):** confirm Off restores pristine dlls from `.bak` (+ restores shortcut Exec after ColdClient) — the idempotent restore-then-apply golden rule, not yet round-tripped on device.
+> 3. **Merge decision:** branch is **19 commits ahead of `origin/main`** and is a **SUPERSET** — Steam-store M3 restyle + Compose container-picker + dl size/progress dual-bar + Goldberg + parked/greyed QR logoff-recovery Fix A/B. Merging Goldberg = merging all of it. Cleanest = one **superset merge** once tiers proven (store rebuild is the substrate Goldberg sits on); alternative = cherry-pick Goldberg-only (fiddly, shared store files).
+> 4. **Release/version:** branch `versionCode 37` == released 2.2.2 → **must bump to vc38+** (monotonic gotcha) before any release. Per the beta-channel strategy, first cut defaults to a **pre-release**.
+> 5. **Catalog:** `goldberg.tzst` (`goldberg-v1`, MD5 `BC48B103AD3B067D3ED7CDFDAF728A4A`) already LIVE on winlator-contents — no re-cut needed unless the gbe_fork build changes.
+>
+> **Recommended next step:** device-test Experimental + ColdClient + Off/restore on a couple of titles → single **superset merge to main** + **vc38 pre-release**. QR path stays parked/greyed, untouched.
 
 ---
 
