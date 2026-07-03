@@ -26,32 +26,66 @@ public class HudMetrics {
 
     public HudMetrics(Context context) { this.context = context; }
 
-    // ---- CPU usage % (/proc/stat aggregate delta) -------------------------
-    private long prevCpuTotal = 0, prevCpuIdle = 0;
+    // ---- CPU usage % (emulator process-tree delta) ------------------------
+    // The global /proc/stat aggregate is unreadable to apps on modern Android
+    // (SELinux proc_stat + hidepid=invisible), so measure the emulator's own CPU
+    // instead: sum utime+stime across our visible (same-UID) process tree — the
+    // app plus its wine/box64/proot children — and delta against wall-clock. This
+    // is the meaningful number for a game HUD and works without root.
+    private long prevCpuTicks = 0, prevWallNs = 0;
+    private boolean cpuBaselineSet = false;
+    private static final long CLK_TCK =
+        Math.max(1, android.system.Os.sysconf(android.system.OsConstants._SC_CLK_TCK));
 
-    /** Overall device CPU usage 0..100, computed from the delta since the last call. */
+    /** Emulator CPU usage 0..100 (share of total capacity), delta since the last call. */
     public float getCPUUsage() {
-        try (BufferedReader r = new BufferedReader(new FileReader("/proc/stat"))) {
-            String line = r.readLine();
-            if (line == null || !line.startsWith("cpu ")) return 0;
-            String[] p = line.trim().split("\\s+");
-            long total = 0, idle = 0;
-            // fields: user nice system idle iowait irq softirq steal ...
-            for (int i = 1; i < p.length; i++) {
-                long v = Long.parseLong(p[i]);
-                total += v;
-                if (i == 4 || i == 5) idle += v; // idle + iowait
-            }
-            long dTotal = total - prevCpuTotal;
-            long dIdle = idle - prevCpuIdle;
-            prevCpuTotal = total;
-            prevCpuIdle = idle;
-            if (dTotal <= 0) return 0;
-            float usage = (dTotal - dIdle) * 100f / dTotal;
+        try {
+            long ticks = readProcessTreeCpuTicks();
+            long nowNs = SystemClock.elapsedRealtimeNanos();
+            long dTicks = ticks - prevCpuTicks;
+            long dWallNs = nowNs - prevWallNs;
+            boolean hadBaseline = cpuBaselineSet;
+            prevCpuTicks = ticks;
+            prevWallNs = nowNs;
+            cpuBaselineSet = true;
+            if (!hadBaseline || dWallNs <= 0 || dTicks < 0) return 0; // first call: only seed baseline
+            int nCores = Math.max(1, Runtime.getRuntime().availableProcessors());
+            double cpuNs = dTicks * (1_000_000_000.0 / CLK_TCK);
+            float usage = (float) (cpuNs * 100.0 / ((double) dWallNs * nCores));
             return Math.max(0, Math.min(100, usage));
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    /** Sum of utime+stime (clock ticks) across all PID dirs visible under /proc. */
+    private long readProcessTreeCpuTicks() {
+        long sum = 0;
+        File proc = new File("/proc");
+        File[] entries = proc.listFiles();
+        if (entries == null) return prevCpuTicks; // keep last -> 0 delta rather than a spike
+        for (File d : entries) {
+            String name = d.getName();
+            boolean numeric = !name.isEmpty();
+            for (int i = 0; numeric && i < name.length(); i++)
+                if (!Character.isDigit(name.charAt(i))) numeric = false;
+            if (!numeric) continue;
+            try (BufferedReader r = new BufferedReader(new FileReader(new File(d, "stat")))) {
+                String line = r.readLine();
+                if (line == null) continue;
+                // Fields 14 (utime) + 15 (stime) are the 12th/13th tokens AFTER the
+                // ')' that closes comm — parsing from there avoids comm's spaces/parens.
+                int close = line.lastIndexOf(')');
+                if (close < 0 || close + 2 >= line.length()) continue;
+                String[] f = line.substring(close + 2).trim().split("\\s+");
+                // post-comm index 0 = state (field 3); utime = field 14 -> index 11,
+                // stime = field 15 -> index 12.
+                if (f.length > 12) sum += Long.parseLong(f[11]) + Long.parseLong(f[12]);
+            } catch (Exception ignored) {
+                // process vanished mid-scan or stat unreadable — skip it.
+            }
+        }
+        return sum;
     }
 
     // ---- GPU load % (ported from FrameRating) -----------------------------
@@ -187,9 +221,19 @@ public class HudMetrics {
         } else {
             microAmps = readCurrentNowFallback();
         }
+        // Show draw magnitude regardless of the device's current-sign convention:
+        // some report discharge as negative, others (this Xiaomi) as positive, so
+        // keying on microAmps < 0 left watts stuck at 0 on the latter. The `charging`
+        // flag (from EXTRA_PLUGGED) still drives the CHG/PWR label in the HUD.
+        // BATTERY_PROPERTY_CURRENT_NOW returns Long.MIN_VALUE when unsupported.
         float watts = 0f;
-        if (microAmps < 0) {
-            watts = (Math.abs(microAmps) * (float) voltageMv) / 1_000_000_000.0f;
+        if (microAmps != 0 && microAmps != Long.MIN_VALUE) {
+            long absUa = Math.abs(microAmps);
+            // Spec unit is µA, but some Xiaomi/MTK units report mA here, which would
+            // round to ~0.0W. Under a running game the draw is always >10mA, so an
+            // implausibly small magnitude means mA — scale it up to µA.
+            if (absUa < 10_000) absUa *= 1000;
+            watts = (absUa * (float) voltageMv) / 1_000_000_000.0f;
         }
         return new Battery(watts, charging);
     }
