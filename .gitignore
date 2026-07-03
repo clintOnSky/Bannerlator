@@ -14,3 +14,6 @@
 
 # local agent worktrees (never commit)
 .claude/worktrees/
+
+# JavaSteam jars — built locally from joshuatam/JavaSteam, not committed
+/app/libs/steam/*.jar
