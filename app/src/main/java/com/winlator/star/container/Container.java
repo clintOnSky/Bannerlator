@@ -401,6 +401,19 @@ public class Container {
         putExtra("frameGenFlowScale", String.valueOf(flowScale));
     }
 
+    // Whether frame gen was actually multiplying (in-game multiplier >= 2) when the user last left,
+    // so it can resume next launch instead of always starting Off. Distinct from the engine gate
+    // (frameGenEnabled) and from frameGenMultiplier (which defaults to 2 when unset, so it can't by
+    // itself distinguish "never opted in" from "on at 2x"). Default off — only set once the user
+    // enables FG from the in-game drawer. Honored at launch only when an engine is selected.
+    public boolean isFrameGenSessionOn() {
+        return getExtra("frameGenSessionOn", "0").equals("1");
+    }
+
+    public void setFrameGenSessionOn(boolean on) {
+        putExtra("frameGenSessionOn", on ? "1" : "0");
+    }
+
     // FPS limiter (implemented by the bionic-fg layer: paces the real/base frames, so with
     // frame gen on the on-screen rate is limit × multiplier). Tuned live from the in-game menu.
     public static final int FPS_LIMITER_DEFAULT = 60;

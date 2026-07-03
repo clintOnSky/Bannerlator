@@ -783,6 +783,14 @@ private fun FrameGenSection(state: XServerDrawerState) {
         ) {
             Column {
                 Spacer(Modifier.height(8.dp))
+                Text(
+                    "Preset",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+                )
+                FgPresetButtons(fgFlow) { fgFlow = it; applyFg() }
+                Spacer(Modifier.height(10.dp))
                 LabeledSlider(
                     "Flow Scale", fgFlow, 0.2f..1.0f,
                     { fgFlow = it }, { applyFg() },
@@ -838,6 +846,49 @@ private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
                     color = if (isSel) Color.Black else accent,
                     fontSize = 13.sp,
                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+// Flow-scale presets, styled like FgMultiplierButtons. Each maps to a fixed flow value; the
+// active chip is the one matching the current flow (epsilon), or none when the slider has been
+// nudged off every preset. Tapping a chip sets that flow value.
+val FG_FLOW_PRESETS = listOf(
+    "Eco" to 0.2f, "Flow" to 0.4f, "Balanced" to 0.6f, "Boost" to 0.8f, "Max" to 1.0f
+)
+
+@Composable
+private fun FgPresetButtons(selectedFlow: Float, onSelect: (Float) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        FG_FLOW_PRESETS.forEach { (label, value) ->
+            val isSel = kotlin.math.abs(selectedFlow - value) < 0.001f
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isSel) accent else Color.Black)
+                    .border(
+                        width = 1.dp,
+                        color = if (isSel) accent else accentDim,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .clickable { onSelect(value) }
+                    .padding(vertical = 9.dp, horizontal = 2.dp)
+            ) {
+                Text(
+                    label,
+                    color = if (isSel) Color.Black else accent,
+                    fontSize = 11.sp,
+                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1
                 )
             }
         }
