@@ -56,7 +56,10 @@ nothing else.
 
 ## Answer shape
 
-Keep it concise and in GitHub-flavored Markdown. A good answer usually:
+Keep it concise and in GitHub-flavored Markdown. **Start directly with the
+answer** — the first line is already substance (the likely cause or a heading).
+No lead-in preamble such as "Now I have a thorough understanding…", "Here's my
+analysis", "Let me explain…", or "Great question". A good answer usually:
 
 1. States the likely cause in a sentence or two.
 2. Backs it with specific `file:line` evidence when you inspected the code.
