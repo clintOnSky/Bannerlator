@@ -441,12 +441,14 @@ class AmazonGameDetailActivity : ComponentActivity() {
         val dir = prefs!!.getString("amazon_dir_$productId", null) ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             deleteDir(File(dir))
-            prefs!!.edit()
-                .remove("amazon_exe_$productId")
-                .remove("amazon_dir_$productId")
-                .apply()
-            // Clear the DL manager's Library row too (files + prefs are gone).
-            productId?.let { StoreDownloadHooks.markUninstalled(Store.AMAZON, it) }
+            // Purge the FULL native install record (exe/dir/manifest-version/size) via the one
+            // canonical helper so the store list, detail page and DL manager all agree — not
+            // just exe+dir, which left stale manifest/size keys behind.
+            productId?.let { pid ->
+                AmazonInstallState.purge(applicationContext, pid)
+                // Clear the DL manager's Library row too (files + prefs are gone).
+                StoreDownloadHooks.markUninstalled(Store.AMAZON, pid)
+            }
             withContext(Dispatchers.Main) {
                 setResult(RESULT_REFRESH)
                 refreshActionState()

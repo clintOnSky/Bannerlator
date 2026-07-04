@@ -84,6 +84,15 @@ data class DownloadEntry(
     val supportsPause: Boolean = false,
     val installPath: String? = null,
     val error: String? = null,
+    /**
+     * True when an INSTALLED game has a newer version available from its store. Store-agnostic
+     * so the Manager card can render one amber "Update available" marker for any store. Derived
+     * per store at seed/produce time (Amazon: cached versionId carries an "_UPDATE_AVAILABLE"
+     * suffix; Steam leaves it false for now — no Steam update detection exists yet). Transient:
+     * NOT persisted to the durable library (the library writer serializes only name/store/
+     * installPath/cover) — it is re-derived on each seed, and a fresh install/update clears it.
+     */
+    val updateAvailable: Boolean = false,
     // ── Transient action handles — held live by the registry, NEVER persisted ──
     val pause: (() -> Unit)? = null,
     val cancel: (() -> Unit)? = null,

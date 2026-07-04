@@ -126,6 +126,7 @@ object StoreDownloadHooks {
                 installPath = installPath,
                 installDone = if (bytes > 0L) bytes else it.installTotal,
                 installTotal = if (bytes > 0L) bytes else it.installTotal,
+                updateAvailable = false,   // a just-installed / just-updated game is up to date
             )
         }
         DownloadForegroundService.finish(key(store, id))   // drop shade line; FGS self-stops when empty

@@ -107,6 +107,10 @@ class DownloadManagerActivity : ComponentActivity() {
         SteamPrefs.init(this)
         SteamRepository.getInstance().initialize(this)
         DownloadRegistry.init(this)
+        // Seed non-Steam libraries too, so opening the Manager directly (without visiting the
+        // Amazon store first) still self-heals orphaned installs and surfaces update-available.
+        // Idempotent; never throws into startup.
+        AmazonLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -243,9 +247,29 @@ class DownloadManagerActivity : ComponentActivity() {
                 }
             },
         ) { ok ->
+            // Clear the durable-library row (also drops the live registry entry) AND the store's
+            // OWN native install record — otherwise the originating store's list/detail keeps
+            // reading "installed" from a record the Manager never touched (device-observed bug).
             DownloadRegistry.removeLibraryEntry(entry.key)
+            purgeNativeInstall(entry)
             uninstallingName = null
             uninstallResult = if (ok) "${entry.name} uninstalled" else "Couldn't fully remove ${entry.name}"
+        }
+    }
+
+    /**
+     * Per-store native install-record purge — the generalized seam so a cross-store uninstall
+     * clears each store's OWN "installed" bookkeeping, not just Steam's DB. Steam is already
+     * handled by the `mark` callback above (DB `markUninstalled`); this covers the storefronts
+     * whose install-state lives outside a DB.
+     */
+    private fun purgeNativeInstall(entry: DownloadEntry) {
+        when (entry.store) {
+            Store.AMAZON -> AmazonInstallState.purge(this, entry.id)
+            // TODO(GOG/EPIC): clear their native install records here when those producers land,
+            // mirroring AmazonInstallState.purge (same shape: remove the store's per-game keys).
+            Store.GOG, Store.EPIC -> Unit
+            Store.STEAM -> Unit   // handled via SteamRepository.markUninstalled in `mark`
         }
     }
 }
@@ -402,11 +426,23 @@ private fun DownloadCard(
                         ActiveContent(entry, onCancel, onPauseResume)
 
                     DownloadState.INSTALLED -> {
-                        Text(
-                            text = "● Installed",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = INSTALLED_GREEN,
-                        )
+                        // Amber "Update available" mirrors the store list's own language
+                        // (AmazonGamesActivity "✓ Installed — Update Available"); up-to-date
+                        // stays installed-green. Store-agnostic: any store that sets
+                        // entry.updateAvailable gets the same marker.
+                        if (entry.updateAvailable) {
+                            Text(
+                                text = "● Installed — Update available",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = UPDATE_AMBER,
+                            )
+                        } else {
+                            Text(
+                                text = "● Installed",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = INSTALLED_GREEN,
+                            )
+                        }
                         Spacer(Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
@@ -637,6 +673,8 @@ private fun ExePickerDialogDm(
 }
 
 private val INSTALLED_GREEN = Color(0xFF4CAF50)
+// Matches the Amazon store list's amber update-available color (AmazonGamesActivity GameCard).
+private val UPDATE_AMBER = Color(0xFFFFAA00)
 
 // One shared byte formatter across the download stack (card text, detail label, shade line).
 private fun fmtSizeDm(bytes: Long): String = formatDownloadSize(bytes)

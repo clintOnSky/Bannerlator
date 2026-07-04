@@ -34,6 +34,12 @@ object AmazonLibrarySync {
     private const val PREFS_NAME = "bh_amazon_prefs"
     private const val CACHE_KEY = "amazon_library_cache"
     private const val DIR_PREFIX = "amazon_dir_"
+    // Suffix AmazonGamesActivity.checkForUpdates stamps onto a cached versionId when a newer
+    // build exists; the store list keys its amber "Update Available" text off the same suffix.
+    private const val UPDATE_SUFFIX = "_UPDATE_AVAILABLE"
+
+    /** Cached per-game metadata pulled from `amazon_library_cache` (best-effort). */
+    private data class Meta(val title: String, val cover: String?, val update: Boolean)
 
     private val seeded = AtomicBoolean(false)
 
@@ -47,8 +53,11 @@ object AmazonLibrarySync {
         try {
             val prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-            // productId -> (title, artUrl) from the games-screen cache (best-effort).
-            val meta = HashMap<String, Pair<String, String?>>()
+            // productId -> cached metadata from the games-screen cache (best-effort). Cover
+            // mirrors the store list's `artUrl.ifEmpty { heroUrl }` so the Manager card shows
+            // the same art. updateAvailable rides the cached versionId's "_UPDATE_AVAILABLE"
+            // suffix (set by AmazonGamesActivity.checkForUpdates) — the exact signal the list uses.
+            val meta = HashMap<String, Meta>()
             prefs.getString(CACHE_KEY, null)?.let { json ->
                 runCatching {
                     val arr = JSONArray(json)
@@ -57,13 +66,17 @@ object AmazonLibrarySync {
                         val pid = j.optString("productId", "")
                         if (pid.isEmpty()) continue
                         val title = j.optString("title", "")
-                        val art = j.optString("artUrl", "").ifEmpty { null }
-                        meta[pid] = title to art
+                        val cover = j.optString("artUrl", "")
+                            .ifEmpty { j.optString("heroUrl", "") }
+                            .ifEmpty { null }
+                        val update = j.optString("versionId", "").endsWith(UPDATE_SUFFIX)
+                        meta[pid] = Meta(title, cover, update)
                     }
                 }
             }
 
             var added = 0
+            var healed = 0
             // Snapshot the keys — walking prefs.all directly while upserting is fine (no
             // concurrent writer at startup), but a copy keeps it obviously safe.
             for ((k, v) in prefs.all) {
@@ -74,19 +87,34 @@ object AmazonLibrarySync {
                 if (dir.isEmpty()) continue
 
                 val installDir = File(dir)
-                // Consider installed if the engine's completion marker is present OR a launch
-                // exe was recorded (covers games installed before the marker existed — matches
-                // AmazonGameDetailActivity.refreshActionState's `installed = exe != null`).
-                val exe = prefs.getString("amazon_exe_$productId", null)
-                val installed = AmazonDownloadManager.isInstalled(installDir) || exe != null
-                if (!installed) continue
-
                 val key = "${Store.AMAZON}:$productId"
-                // Don't clobber a live/queued download that may already own this key.
+
+                // A live/queued download already owns this key and writes amazon_dir_ BEFORE the
+                // completion marker exists — never seed a duplicate nor (below) self-heal it out
+                // from under an in-flight install. Leave it entirely to the producer.
                 if (DownloadRegistry.isActive(key)) continue
 
-                val (title, art) = meta[productId] ?: (productId to null)
-                val name = title.ifEmpty { productId }
+                // Truth = the install must still EXIST ON DISK. Previously `exe != null` alone
+                // counted as installed, which resurrected zombies: an uninstall via the cross-
+                // store Manager deleted the files but left these prefs, so the next cold start
+                // seeded a phantom. Require the completion marker OR a launch exe that is really
+                // still present.
+                val exe = prefs.getString("amazon_exe_$productId", null)
+                val installed = AmazonDownloadManager.isInstalled(installDir) ||
+                    (exe != null && File(exe).exists())
+
+                if (!installed) {
+                    // Self-heal: the files are gone (uninstalled elsewhere, or a failed/partial
+                    // install left orphan prefs). Purge the stale native record and drop any
+                    // durable-library row so all surfaces agree the game is NOT installed.
+                    AmazonInstallState.purge(ctx, productId)
+                    DownloadRegistry.removeLibraryEntry(key)
+                    healed++
+                    continue
+                }
+
+                val m = meta[productId] ?: Meta(productId, null, false)
+                val name = m.title.ifEmpty { productId }
                 val bytes = prefs.getLong("amazon_size_$productId", 0L).let { if (it > 0L) it else 0L }
 
                 DownloadRegistry.upsert(
@@ -94,18 +122,19 @@ object AmazonLibrarySync {
                         store = Store.AMAZON,
                         id = productId,
                         name = name,
-                        cover = art,
+                        cover = m.cover,
                         state = DownloadState.INSTALLED,
                         pct = 100,
                         installDone = bytes,
                         installTotal = bytes,
                         supportsPause = false,
                         installPath = installDir.absolutePath,
+                        updateAvailable = m.update,
                     )
                 )
                 added++
             }
-            Log.i(TAG, "Seeded $added installed Amazon game(s) into DownloadRegistry")
+            Log.i(TAG, "Seeded $added installed Amazon game(s), self-healed $healed orphan(s)")
         } catch (t: Throwable) {
             // Reset so a later call (once prefs are ready) can retry.
             seeded.set(false)

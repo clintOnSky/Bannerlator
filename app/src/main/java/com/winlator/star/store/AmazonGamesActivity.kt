@@ -584,10 +584,12 @@ class AmazonGamesActivity : ComponentActivity() {
         if (installedDir == null) return
         lifecycleScope.launch(Dispatchers.IO) {
             deleteDir(File(installedDir))
-            prefs!!.edit()
-                .remove("amazon_exe_${game.productId}")
-                .remove("amazon_dir_${game.productId}")
-                .apply()
+            // Purge the FULL native install record via the canonical helper, and clear the DL
+            // manager's registry/library row — so uninstalling from the list keeps the detail
+            // page and the cross-store Download Manager in sync (previously it left the DL card
+            // and stale manifest/size prefs behind).
+            AmazonInstallState.purge(applicationContext, game.productId)
+            StoreDownloadHooks.markUninstalled(Store.AMAZON, game.productId)
             withContext(Dispatchers.Main) {
                 refreshFromCache()
                 Toast.makeText(
