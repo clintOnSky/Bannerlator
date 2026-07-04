@@ -73,6 +73,7 @@ import com.winlator.star.store.compose.AddShortcutResult
 import com.winlator.star.store.compose.AddToShortcutsRequest
 import com.winlator.star.store.compose.ContainerPickerDialog
 import com.winlator.star.store.compose.openShortcutsScreen
+import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -373,6 +374,7 @@ private fun SteamGamesScreen(
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
+            DownloadsButton()
             IconButton(onClick = onLogout) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Logout,
@@ -553,8 +555,11 @@ private fun GameListItem(
     }
 }
 
+// internal (not private): the cross-store Download Manager (store.download package) reuses
+// this exact Steam poster loader for its list cards, so a downloading/installed row looks
+// identical to a Library row. Steam art is resolved from the appId.
 @Composable
-private fun GameCoverArt(appId: Int, modifier: Modifier = Modifier) {
+internal fun GameCoverArt(appId: Int, modifier: Modifier = Modifier) {
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var loaded by remember { mutableStateOf(false) }
 

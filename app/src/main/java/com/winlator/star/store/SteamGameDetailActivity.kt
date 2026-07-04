@@ -62,6 +62,7 @@ import com.winlator.star.store.compose.AddShortcutResult
 import com.winlator.star.store.compose.AddToShortcutsRequest
 import com.winlator.star.store.compose.ContainerPickerDialog
 import com.winlator.star.store.compose.openShortcutsScreen
+import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.ui.theme.WinlatorTheme
 import java.io.File
 import java.net.URL
@@ -668,6 +669,7 @@ private fun SteamGameDetailScreen(
             }
             Spacer(Modifier.weight(1f))
             SteamStatusPill(status = steamStatus, onReconnect = onReconnect)
+            DownloadsButton()
         }
 
         // Hero image with a subtle gradient into the background at the bottom

@@ -1,0 +1,590 @@
+package com.winlator.star.store
+
+import android.content.Intent
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.winlator.star.store.compose.AddResultDialog
+import com.winlator.star.store.compose.AddShortcutResult
+import com.winlator.star.store.compose.AddToShortcutsRequest
+import com.winlator.star.store.compose.ContainerPickerDialog
+import com.winlator.star.store.compose.openShortcutsScreen
+import com.winlator.star.store.download.DownloadEntry
+import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadState
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreStyle
+import com.winlator.star.ui.theme.WinlatorTheme
+import java.io.File
+
+/**
+ * Phase 3 — the cross-store Download Manager screen. A thin Compose consumer of the
+ * store-agnostic [DownloadRegistry]: it collects [DownloadRegistry.entries] and renders
+ * each row with the same card idiom as the Steam library list. All store wiring lives in
+ * the producers (Phase 2); this Activity only reads the registry and calls back the
+ * per-entry `pause`/`cancel` handles the producer attached.
+ *
+ * Launch / uninstall reuse the exact Steam flow the detail/library screens use
+ * (AmazonLaunchHelper exe-scan → container picker → StarLaunchBridge shortcut write,
+ * Goldberg-aware via [GoldbergPatcher.resolveLaunchExe]); Steam-specific DB ops are gated
+ * on `entry.store == STEAM`. Lives in the `store` package (not `store.download`) so it can
+ * reach those package-private Java launch helpers, exactly like the other Steam Activities.
+ * Epic/GOG/Amazon land in a later phase.
+ */
+class DownloadManagerActivity : ComponentActivity() {
+
+    // Add-to-shortcuts flow state (mirrors SteamGamesActivity / SteamGameDetailActivity).
+    private var showExePicker by mutableStateOf<ExePickerDataDm?>(null)
+    private var addToShortcuts by mutableStateOf<AddToShortcutsRequest?>(null)
+    private var addResult by mutableStateOf<AddShortcutResult?>(null)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // Idempotent: seeds the durable library so the screen has rows even if opened
+        // before any producer touched the registry this session.
+        SteamPrefs.init(this)
+        SteamRepository.getInstance().initialize(this)
+        DownloadRegistry.init(this)
+
+        setContent {
+            WinlatorTheme {
+                DownloadManagerScreen(
+                    onBack = { finish() },
+                    onClear = { clearTerminalAndLibrary() },
+                    onEntryClick = { openDetail(it) },
+                    onLaunch = { launch(it) },
+                    onUninstall = { uninstall(it) },
+                    onCancel = { it.cancel?.invoke() },
+                    onPauseResume = { it.pause?.invoke() },
+                    onDismiss = { DownloadRegistry.remove(it.key) },
+                )
+
+                showExePicker?.let { data ->
+                    ExePickerDialogDm(
+                        gameName = data.gameName,
+                        candidates = data.candidates,
+                        onDismiss = { showExePicker = null },
+                        onSelected = { chosen ->
+                            showExePicker = null
+                            startAddToShortcuts(data.appId, data.gameName, chosen, data.coverUrl)
+                        },
+                    )
+                }
+
+                addToShortcuts?.let { req ->
+                    ContainerPickerDialog(
+                        gameName = req.gameName,
+                        containers = req.containers,
+                        onDismiss = { addToShortcuts = null },
+                        onSelected = { container ->
+                            addToShortcuts = null
+                            StarLaunchBridge.writeShortcutAsync(
+                                this@DownloadManagerActivity, container,
+                                req.gameName, req.exePath, req.coverUrl,
+                            ) { success, message ->
+                                addResult = AddShortcutResult(req.gameName, success, message)
+                            }
+                        },
+                    )
+                }
+
+                addResult?.let { result ->
+                    AddResultDialog(
+                        result = result,
+                        onOpenShortcuts = {
+                            addResult = null
+                            openShortcutsScreen(this@DownloadManagerActivity)
+                        },
+                        onDismiss = { addResult = null },
+                    )
+                }
+            }
+        }
+    }
+
+    /** Clear ✓: drop terminal FAILED/CANCELLED rows and wipe the installed library,
+     *  leaving active downloads untouched (BannerHub "clear finished" semantics). */
+    private fun clearTerminalAndLibrary() {
+        DownloadRegistry.entries.value.forEach { e ->
+            if (e.state == DownloadState.FAILED || e.state == DownloadState.CANCELLED) {
+                DownloadRegistry.remove(e.key)
+            }
+        }
+        DownloadRegistry.clearLibrary()
+    }
+
+    /** Tap a card → open that game's detail in its store. Steam-only for v1. */
+    private fun openDetail(entry: DownloadEntry) {
+        when (entry.store) {
+            Store.STEAM -> startActivity(
+                Intent(this, SteamGameDetailActivity::class.java)
+                    .putExtra(SteamGameDetailActivity.EXTRA_APP_ID, entry.id.toIntOrNull() ?: 0),
+            )
+            else -> { /* Epic/GOG/Amazon detail routing is a later phase. */ }
+        }
+    }
+
+    /** Same launch flow the Steam screens use: scan for exes, pick one, add a shortcut. */
+    private fun launch(entry: DownloadEntry) {
+        val dir = entry.installPath
+        if (dir.isNullOrEmpty()) {
+            Toast.makeText(this, "Install directory not set", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val appId = entry.id.toIntOrNull() ?: 0
+        val installDir = File(dir)
+        Thread {
+            val exeFiles = mutableListOf<File>()
+            AmazonLaunchHelper.collectExe(installDir, exeFiles)
+            if (exeFiles.isEmpty()) {
+                runOnUiThread {
+                    Toast.makeText(this, "No .exe found in install directory", Toast.LENGTH_LONG).show()
+                }
+                return@Thread
+            }
+            val lowerTitle = entry.name.lowercase()
+            exeFiles.sortWith { a, b ->
+                AmazonLaunchHelper.scoreExe(b, lowerTitle) - AmazonLaunchHelper.scoreExe(a, lowerTitle)
+            }
+            val coverUrl = "https://shared.steamstatic.com/store_item_assets/steam/apps/$appId/library_600x900.jpg"
+
+            if (exeFiles.size == 1) {
+                runOnUiThread { startAddToShortcuts(appId, entry.name, exeFiles[0].absolutePath, coverUrl) }
+                return@Thread
+            }
+            val candidates = exeFiles.map { it.absolutePath }
+            runOnUiThread { showExePicker = ExePickerDataDm(appId, entry.name, candidates, coverUrl) }
+        }.start()
+    }
+
+    /** Load containers, then show the M3 picker. Goldberg Cold-Client rewrites the exe. */
+    private fun startAddToShortcuts(appId: Int, gameName: String, exePath: String, coverUrl: String?) {
+        val launchExe = GoldbergPatcher.resolveLaunchExe(this, appId, exePath)
+        StarLaunchBridge.loadContainers(this) { containers ->
+            addToShortcuts = AddToShortcutsRequest(gameName, launchExe, coverUrl, containers)
+        }
+    }
+
+    /** Uninstall: mark uninstalled in the store DB, delete the install dir, drop the
+     *  durable-library row (which also removes it from the live registry). */
+    private fun uninstall(entry: DownloadEntry) {
+        if (entry.store == Store.STEAM) {
+            entry.id.toIntOrNull()?.let { SteamRepository.getInstance().database.markUninstalled(it) }
+        }
+        entry.installPath?.takeIf { it.isNotEmpty() }?.let { p ->
+            Thread { File(p).deleteRecursively() }.start()
+        }
+        DownloadRegistry.removeLibraryEntry(entry.key)
+    }
+}
+
+private data class ExePickerDataDm(
+    val appId: Int,
+    val gameName: String,
+    val candidates: List<String>,
+    val coverUrl: String,
+)
+
+// --- Composable screen ---
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DownloadManagerScreen(
+    onBack: () -> Unit,
+    onClear: () -> Unit,
+    onEntryClick: (DownloadEntry) -> Unit,
+    onLaunch: (DownloadEntry) -> Unit,
+    onUninstall: (DownloadEntry) -> Unit,
+    onCancel: (DownloadEntry) -> Unit,
+    onPauseResume: (DownloadEntry) -> Unit,
+    onDismiss: (DownloadEntry) -> Unit,
+) {
+    val entries by DownloadRegistry.entries.collectAsStateWithLifecycle()
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text("Downloads & Library") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                        )
+                    }
+                },
+                actions = {
+                    TextButton(onClick = onClear) { Text("Clear ✓") }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground,
+                    actionIconContentColor = MaterialTheme.colorScheme.primary,
+                ),
+            )
+        },
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+        ) {
+            if (entries.isEmpty()) {
+                Text(
+                    text = "No downloads or installed games yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                )
+            } else {
+                // Registry is pre-sorted downloads-first then library. Split by isActive so
+                // in-flight downloads and the installed library each get a light header —
+                // only when both groups are present (a pure library list stays header-less).
+                val active = entries.filter { it.isActive }
+                val rest = entries.filterNot { it.isActive }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 6.dp),
+                ) {
+                    if (active.isNotEmpty()) {
+                        item(key = "hdr_downloading") { SectionHeader("Downloading") }
+                        items(active, key = { it.key }) { entry ->
+                            DownloadCard(entry, onEntryClick, onLaunch, onUninstall, onCancel, onPauseResume, onDismiss)
+                        }
+                        if (rest.isNotEmpty()) {
+                            item(key = "hdr_library") { SectionHeader("Library") }
+                        }
+                    }
+                    items(rest, key = { it.key }) { entry ->
+                        DownloadCard(entry, onEntryClick, onLaunch, onUninstall, onCancel, onPauseResume, onDismiss)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 2.dp),
+    )
+}
+
+@Composable
+private fun DownloadCard(
+    entry: DownloadEntry,
+    onClick: (DownloadEntry) -> Unit,
+    onLaunch: (DownloadEntry) -> Unit,
+    onUninstall: (DownloadEntry) -> Unit,
+    onCancel: (DownloadEntry) -> Unit,
+    onPauseResume: (DownloadEntry) -> Unit,
+    onDismiss: (DownloadEntry) -> Unit,
+) {
+    // Same floating card as SteamGamesActivity.GameListItem: rounded surfaceVariant panel,
+    // outline border, side margins, tall poster + info column.
+    Card(
+        onClick = { onClick(entry) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+        ) {
+            // Reuse the Steam poster loader. Steam entry.cover holds the appId string.
+            GameCoverArt(
+                appId = entry.cover?.toIntOrNull() ?: 0,
+                modifier = Modifier
+                    .size(width = 60.dp, height = 80.dp)
+                    .clip(RoundedCornerShape(6.dp)),
+            )
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                StoreBadge(entry.store)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = entry.name.ifEmpty { "${entry.store} ${entry.id}" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+
+                when (entry.state) {
+                    DownloadState.DOWNLOADING, DownloadState.PAUSED, DownloadState.QUEUED ->
+                        ActiveContent(entry, onCancel, onPauseResume)
+
+                    DownloadState.INSTALLED -> {
+                        Text(
+                            text = "● Installed",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = INSTALLED_GREEN,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { onLaunch(entry) },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                            ) { Text("Launch", style = MaterialTheme.typography.labelSmall) }
+                            OutlinedButton(
+                                onClick = { onUninstall(entry) },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error,
+                                ),
+                                modifier = Modifier.height(32.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                            ) { Text("Uninstall", style = MaterialTheme.typography.labelSmall) }
+                        }
+                    }
+
+                    DownloadState.FAILED -> {
+                        Text(
+                            text = entry.error?.let { "Failed: $it" } ?: "Download failed",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        OutlinedButton(
+                            onClick = { onDismiss(entry) },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                        ) { Text("Dismiss", style = MaterialTheme.typography.labelSmall) }
+                    }
+
+                    DownloadState.CANCELLED -> {
+                        Text(
+                            text = "Cancelled",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        OutlinedButton(
+                            onClick = { onDismiss(entry) },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                        ) { Text("Dismiss", style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** DOWNLOADING/PAUSED/QUEUED body: the two-bar byte model + status text + action buttons. */
+@Composable
+private fun ActiveContent(
+    entry: DownloadEntry,
+    onCancel: (DownloadEntry) -> Unit,
+    onPauseResume: (DownloadEntry) -> Unit,
+) {
+    val installFrac = if (entry.installTotal > 0)
+        (entry.installDone.toFloat() / entry.installTotal) else (entry.pct / 100f)
+    val downloadFrac = if (entry.downloadTotal > 0)
+        (entry.downloadDone.toFloat() / entry.downloadTotal) else installFrac
+    val pct = (installFrac.coerceIn(0f, 1f) * 100).toInt()
+
+    // Overlapping dual bar, identical to SteamGameDetailActivity: lighter network fill
+    // underneath, solid on-disk install fill on top.
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(downloadFrac.coerceIn(0f, 1f))
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(installFrac.coerceIn(0f, 1f))
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+    }
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text = when (entry.state) {
+            DownloadState.PAUSED -> "Paused — $pct%  (${fmtSizeDm(entry.installDone)} / ${fmtSizeDm(entry.installTotal)})"
+            DownloadState.QUEUED -> "Queued…"
+            else -> "Downloading… $pct%  (${fmtSizeDm(entry.installDone)} / ${fmtSizeDm(entry.installTotal)})"
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(6.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(
+            onClick = { onCancel(entry) },
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.error,
+            ),
+            modifier = Modifier.height(32.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+        ) { Text("✕ Cancel", style = MaterialTheme.typography.labelSmall) }
+
+        if (entry.supportsPause) {
+            Button(
+                onClick = { onPauseResume(entry) },
+                shape = RoundedCornerShape(8.dp),
+                colors = if (entry.state == DownloadState.PAUSED) {
+                    ButtonDefaults.buttonColors()
+                } else {
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    )
+                },
+                modifier = Modifier.height(32.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    text = if (entry.state == DownloadState.PAUSED) "Resume" else "Pause",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+    }
+}
+
+/** Small store-tinted chip so a mixed-store list reads at a glance. */
+@Composable
+private fun StoreBadge(store: Store) {
+    val accent = StoreStyle.accent(store)
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(accent.copy(alpha = 0.18f))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = StoreStyle.label(store),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = accent,
+        )
+    }
+}
+
+@Composable
+private fun ExePickerDialogDm(
+    gameName: String,
+    candidates: List<String>,
+    onDismiss: () -> Unit,
+    onSelected: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select executable for \"$gameName\"") },
+        text = {
+            // Cap at ~half the screen height so a long bin/*.exe list still scrolls to the
+            // real game exe (same treatment as the Steam screens' exe pickers).
+            val maxListHeight = (LocalConfiguration.current.screenHeightDp * 0.5f).dp
+            Column(
+                modifier = Modifier
+                    .heightIn(max = maxListHeight)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                candidates.forEach { path ->
+                    val f = File(path)
+                    val parent = f.parentFile
+                    val label = if (parent != null) "${parent.name}/${f.name}" else f.name
+                    TextButton(
+                        onClick = { onSelected(path) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(label, modifier = Modifier.weight(1f)) }
+                }
+            }
+        },
+        confirmButton = {},
+    )
+}
+
+private val INSTALLED_GREEN = Color(0xFF4CAF50)
+
+private fun fmtSizeDm(bytes: Long): String = when {
+    bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
+    bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
+    else                    -> "%.0f KB".format(bytes / 1024.0)
+}
