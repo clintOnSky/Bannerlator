@@ -2,6 +2,19 @@
 
 ---
 
+## 2026-07-04 — ▶️ WHERE WE LEFT OFF: diagnostic build delivered to device; awaiting user HL2 download re-run (session may crash on app-open)
+
+> **State:** CI `28688995408` **SUCCESS** (compiled clean — the Java→Kotlin-`internal` `getJobManager$javasteam()` call is valid). Branch `feat/steam-goldberg-patcher` HEAD `7e73811` (`e301ca4` JavaSteam LogListener + `7925db9` 60s AsyncJob-timeout watchdog). **APK copied to device:** `/sdcard/Download/Bannerlator-standard-diag-28688995408.apk` (589,497,172 B, byte-size verified vs artifact, media-scanned). Standard flavor = `com.winlator.banner`. User installs manually.
+> **The pending test:** install APK → open app → HL2 (appId 220) → Download → **let it sit ≥60s** (do not cancel early).
+> **⚠️ CRASH-RECOVERY RUNBOOK (user expects the PRoot session to die when the app opens):**
+> 1. The local capture `~/scratchpad/steam.log` (steamwatch.py) **dies with the session** — do NOT rely on it. The **crash-proof source is the ON-DEVICE debug file:** `python3 ~/scratchpad/getlog.py exec cat /storage/emulated/0/Android/data/com.winlator.banner/files/steam_debug.txt`. (Root bridge = getlog daemon `127.0.0.1:8765`, token `~/.logcat-bridge.token`; if absent, `cp /data/data/com.termux/files/home/.logcat-bridge.token ~/.logcat-bridge.token`.)
+> 2. This build's `steam_debug.txt` now carries `[JS/…]` JavaSteam-internal lines (TcpConnection send/recv, SteamApps.handleMsg, AsyncJobManager, manifest/CDN) + `bumpPendingJobTimeouts: raised N job(s) to 60000ms` watchdog lines — none of which existed before.
+> 3. **Read the window between `onDownloadStarted` and the outcome:** reply/frame lands LATE (~10–60s) and bytes then flow = **transient netThread head-of-line block** behind the ~229-app PICS parse (cause #1 — and the download should actually proceed now) → real fix = serialize/chunk library PICS off the download's netThread (or gate `installApp` behind a library-sync drain). NOTHING inbound by 60s = **genuine no-reply** (session-not-ready / stale socket, cause #2/#3) → real fix = always `ensureSessionReady` before the first depot job (drop the `!isLoggedIn` short-circuit `SteamDepotDownloader.kt:179`).
+> 4. **Do NOT** implement "give DepotDownloader its own dispatcher / don't block `.get()`" — that hypothesis is refuted (see entry below).
+> **Everything under this line is the diagnosis history that produced this build.**
+
+---
+
 ## 2026-07-03 — 🔬 Deadlock hypothesis REFUTED by code-level analysis; real cause = download's first CM AsyncJob gets no reply in 10s (leading: netThread head-of-line block by JavaSteam PICS parse). Diagnostic LogListener build incoming.
 
 > **Correction of the entry below:** the "coroutine-dispatcher deadlock" call was WRONG. A native-steam-engineer pass over the *decompiled* JavaSteam 1.8.0 + depotdownloader 1.8.0 (the exact versions pinned in `app/build.gradle:197-198`) refuted it:
