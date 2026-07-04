@@ -66,6 +66,7 @@ import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.Store
 import com.winlator.star.store.download.StoreStyle
+import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 import java.io.File
 
@@ -458,27 +459,29 @@ private fun ActiveContent(
         (entry.downloadDone.toFloat() / entry.downloadTotal) else installFrac
     val pct = (installFrac.coerceIn(0f, 1f) * 100).toInt()
 
-    // Overlapping dual bar, identical to SteamGameDetailActivity: lighter network fill
-    // underneath, solid on-disk install fill on top.
+    // Overlapping dual bar: the network (download) fill uses the themeable dim-accent underneath
+    // so it reads as a DISTINCT second tone (not just a faded primary — that blended into one bar
+    // when install% and download% tracked closely); the solid primary on-disk install fill sits on
+    // top. Both colors follow the app theme via WinlatorTheme.
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(6.dp)
-            .clip(RoundedCornerShape(3.dp))
+            .height(8.dp)
+            .clip(RoundedCornerShape(4.dp))
             .background(MaterialTheme.colorScheme.surface),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(downloadFrac.coerceIn(0f, 1f))
-                .clip(RoundedCornerShape(3.dp))
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                .clip(RoundedCornerShape(4.dp))
+                .background(LocalAccentDim.current),
         )
         Box(
             modifier = Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(installFrac.coerceIn(0f, 1f))
-                .clip(RoundedCornerShape(3.dp))
+                .clip(RoundedCornerShape(4.dp))
                 .background(MaterialTheme.colorScheme.primary),
         )
     }
