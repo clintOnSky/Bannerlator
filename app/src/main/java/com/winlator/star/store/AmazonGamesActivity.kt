@@ -60,6 +60,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -106,6 +109,12 @@ class AmazonGamesActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences(PREFS_NAME, 0)
         viewMode = prefs!!.getString(VIEW_MODE_KEY, "grid") ?: "grid"
+
+        // Cross-store Download Manager (Phase A): init the registry + seed the installed
+        // Amazon library here too, so an INSTALLED library is present even if the user opens
+        // the Amazon list without ever touching Steam. Idempotent.
+        DownloadRegistry.init(this)
+        AmazonLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -437,18 +446,39 @@ class AmazonGamesActivity : ComponentActivity() {
                 installDir.absolutePath,
             ).apply()
 
+            // Publish this list-flow download into the cross-store Download Manager registry \u2014
+            // same shim + same key as the detail screen, so a live DOWNLOADING row shows here too
+            // and doesn't double-list against the later seeded Library row. One honest install bar.
+            StoreDownloadHooks.registerDownload(
+                store = Store.AMAZON,
+                id = game.productId,
+                name = game.title,
+                cover = game.artUrl,
+                supportsPause = false,
+                installTotal = prefs!!.getLong("amazon_size_${game.productId}", 0L),
+                cancel = { cancelled.set(true) },
+            )
+
             val ok = AmazonDownloadManager.install(
                 this@AmazonGamesActivity, game, token, installDir,
                 { dl, total, file ->
                     if (cancelled.get()) return@install
                     val pct = if (total > 0) (dl * 100L / total).toInt() else 0
                     val name = if (!file.isNullOrEmpty()) file else "Downloading\u2026"
+                    StoreDownloadHooks.tick(
+                        store = Store.AMAZON,
+                        id = game.productId,
+                        pct = pct,
+                        installDone = dl,
+                        installTotal = total,
+                    )
                     updateDownloadState(game.productId, pct, name)
                 },
                 { cancelled.get() },
             )
 
             if (cancelled.get()) {
+                StoreDownloadHooks.markCancelled(Store.AMAZON, game.productId)
                 removeDownloadState(game.productId)
                 return@launch
             }
@@ -460,6 +490,7 @@ class AmazonGamesActivity : ComponentActivity() {
                         Toast.LENGTH_LONG,
                     ).show()
                 }
+                StoreDownloadHooks.markFailed(Store.AMAZON, game.productId, "Download failed")
                 removeDownloadState(game.productId)
                 return@launch
             }
@@ -475,6 +506,7 @@ class AmazonGamesActivity : ComponentActivity() {
                         Toast.LENGTH_LONG,
                     ).show()
                 }
+                StoreDownloadHooks.markFailed(Store.AMAZON, game.productId, "No executable found")
                 removeDownloadState(game.productId)
                 return@launch
             }
@@ -517,6 +549,15 @@ class AmazonGamesActivity : ComponentActivity() {
             )
         }
         prefs!!.edit().putString("amazon_exe_$productId", exePath).apply()
+        // Terminal success → INSTALLED (persisted to the durable library).
+        prefs!!.getString("amazon_dir_$productId", null)?.let { dir ->
+            StoreDownloadHooks.markInstalled(
+                store = Store.AMAZON,
+                id = productId,
+                installPath = dir,
+                bytes = prefs!!.getLong("amazon_size_$productId", 0L),
+            )
+        }
         refreshFromCache()
     }
 

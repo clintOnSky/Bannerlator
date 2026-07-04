@@ -45,6 +45,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -121,6 +124,13 @@ class AmazonGameDetailActivity : ComponentActivity() {
             return
         }
 
+        // Cross-store Download Manager (Phase A): Amazon can download without the Steam
+        // foreground service ever running, so init the registry + seed the installed library
+        // here (idempotent) — otherwise DownloadRegistry.libPrefs is uninitialized and this
+        // download's INSTALLED row wouldn't persist to the durable library.
+        DownloadRegistry.init(this)
+        AmazonLibrarySync.seed(this)
+
         refreshActionState()
         loadDlcData()
         loadInstallSize()
@@ -192,6 +202,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
     // ── Install ───────────────────────────────────────────────────────────
 
     private fun onInstallClicked() {
+        val pid = productId ?: return
         if (installBtnText == "Cancel") {
             cancelDownload?.invoke()
             cancelDownload = null
@@ -232,12 +243,33 @@ class AmazonGameDetailActivity : ComponentActivity() {
                 installDir.absolutePath,
             ).apply()
 
+            // Publish this download into the cross-store Download Manager registry. Amazon has
+            // no separate compressed stage \u2014 one honest install bar (byte pair below), download
+            // pair left at 0. Cancel routes to the same flag the detail page's Cancel uses.
+            StoreDownloadHooks.registerDownload(
+                store = Store.AMAZON,
+                id = pid,
+                name = titleText ?: pid,
+                cover = artUrl,
+                supportsPause = false,
+                installTotal = prefs!!.getLong("amazon_size_$pid", 0L),
+                cancel = { cancelled.set(true) },
+            )
+
             val ok = AmazonDownloadManager.install(
                 this@AmazonGameDetailActivity, game, token, installDir,
                 { dl, total, file ->
                     if (cancelled.get()) return@install
                     val pct = if (total > 0) (dl * 100L / total).toInt() else 0
                     val name = if (!file.isNullOrEmpty()) file else "Downloading\u2026"
+                    // Mirror the exact figures into the DL manager (real aggregate bytes).
+                    StoreDownloadHooks.tick(
+                        store = Store.AMAZON,
+                        id = pid,
+                        pct = pct,
+                        installDone = dl,
+                        installTotal = total,
+                    )
                     runOnUiThread {
                         progressValue = pct
                         progressLabel = name
@@ -292,6 +324,19 @@ class AmazonGameDetailActivity : ComponentActivity() {
         cancelDownload = null
         progressVisible = false
         progressLabelVisible = false
+        // Terminal success → INSTALLED (persisted to the durable library so it survives
+        // process death in the DL manager's Library section).
+        productId?.let { pid ->
+            val dir = prefs!!.getString("amazon_dir_$pid", null)
+            if (dir != null) {
+                StoreDownloadHooks.markInstalled(
+                    store = Store.AMAZON,
+                    id = pid,
+                    installPath = dir,
+                    bytes = prefs!!.getLong("amazon_size_$pid", 0L),
+                )
+            }
+        }
         setResult(RESULT_REFRESH)
         refreshActionState()
     }
@@ -304,6 +349,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
         installBtnColor = 0xFFFF9900.toInt()
         launchBtnEnabled = true
         setExeBtnVisible = true
+        productId?.let { StoreDownloadHooks.markFailed(Store.AMAZON, it, msg) }
         Toast.makeText(this, "Error: $msg", Toast.LENGTH_LONG).show()
     }
 
@@ -315,6 +361,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
         installBtnColor = 0xFFFF9900.toInt()
         launchBtnEnabled = true
         setExeBtnVisible = true
+        productId?.let { StoreDownloadHooks.markCancelled(Store.AMAZON, it) }
     }
 
     // ── Set .exe ──────────────────────────────────────────────────────────
@@ -364,6 +411,8 @@ class AmazonGameDetailActivity : ComponentActivity() {
                 .remove("amazon_exe_$productId")
                 .remove("amazon_dir_$productId")
                 .apply()
+            // Clear the DL manager's Library row too (files + prefs are gone).
+            productId?.let { StoreDownloadHooks.markUninstalled(Store.AMAZON, it) }
             withContext(Dispatchers.Main) {
                 setResult(RESULT_REFRESH)
                 refreshActionState()
