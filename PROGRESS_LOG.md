@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-07-04 — 🛠️ Building Batch 1 hardening (library-sync fix) — native-steam agent implementing, build pending
+
+> **State:** user approved building the fixes in 2 batches. A native-steam-engineer subagent is IMPLEMENTING **Batch 1** right now (not yet committed/built). Branch `feat/steam-goldberg-patcher`.
+> **Batch 1 (make a full download work + be correct):** (1) `SteamRepository.syncApps` refactor — ONE 372-app `picsGetProductInfo` → sequential batches of 25; add `downloadActive` flag + pause the app-sync while a download is active so the DL's `requestAppInfo(220)` gets a clear CM connection; (2) `SteamDepotDownloader.runInstall` sets `repo.setDownloadActive(true/false)` around the CM work; (3) resume/false-complete guard — don't `markInstalled` if `finalInstall < iTotal*0.90` (fixes the 405 MB-of-8.4 GB false "Installed"); (4) new `res/xml/network_security_config.xml` cleartext-allow only `steamcontent.com`/`steampipe.steamcontent.com` + manifest ref (kills 500+ `alibaba:80` errors).
+> **Batch 2 (later, after Batch 1 proves a clean DL):** single Steam session across the app's own processes; appInfo-no-reply→reconnect+retry; wakelock + keep-FGS-alive.
+> **Architecture note (told user):** bottleneck = the SINGLE shared Steam CM TCP connection, not threads/CPU. Can't use a 2nd thread (no 2nd pipe to Steam) or a 2nd process/connection (Steam = one session/account; 2nd logon = LogonSessionReplaced). Downloads: CM control phase (shared session — starved by the sync) vs CDN chunk bytes (already separate parallel HTTP). Fix = time-share the one CM pipe (batch+pause).
+> **Next:** review agent diff → commit → dispatch CI → deliver APK → device-test. (User asked to checkpoint now / when build starts / when it finishes.)
+
+---
+
 ## 2026-07-04 — 🗺️ PLAN: gated merge of `feat/steam-goldberg-patcher` → `main` (user-approved)
 
 > **Goal:** consolidate the Steam + Goldberg work into `main` so it stops getting lost (the old `feat/steam-detail-revamp` Steam fixes were abandoned on a local branch and had to be re-derived when the store was rebuilt here). **But gate the merge on quality — do NOT merge the not-yet-completing download flow.**
