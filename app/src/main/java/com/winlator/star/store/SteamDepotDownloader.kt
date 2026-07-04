@@ -6,6 +6,8 @@ import `in`.dragonbra.javasteam.depotdownloader.DepotDownloader
 import `in`.dragonbra.javasteam.depotdownloader.IDownloadListener
 import `in`.dragonbra.javasteam.depotdownloader.data.AppItem
 import `in`.dragonbra.javasteam.depotdownloader.data.DownloadItem
+import `in`.dragonbra.javasteam.util.log.LogListener
+import `in`.dragonbra.javasteam.util.log.LogManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -88,6 +90,35 @@ object SteamDepotDownloader {
         } catch (_: Exception) {}
     }
 
+    // -------------------------------------------------------------------------
+    // JavaSteam internal log bridge
+    // -------------------------------------------------------------------------
+    // JavaSteam routes ALL of its internal logging (TcpConnection send/recv,
+    // SteamClient.postCallback, SteamApps.handleMsg PICS parse, AsyncJobManager
+    // timeouts, SteamContent manifest-request-code, CDN lookups) through
+    // LogManager.LOG_LISTENERS. The app never registered a listener, so every one
+    // of those lines is silently discarded — which is why steam_debug.txt shows a
+    // 10s gap with "no CM traffic" between onDownloadStarted and the AsyncJob
+    // CancellationException. Wire a listener so the NEXT capture reveals whether the
+    // CM request is actually written to the socket, whether any inbound frame is
+    // read on the TcpConnection thread, and exactly where the manifest/app-info job
+    // stalls. Installed once, forwards into the same steam_debug.txt the UI shares.
+    private val jsLogWired = AtomicBoolean(false)
+
+    private fun wireJavaSteamLog() {
+        if (!jsLogWired.compareAndSet(false, true)) return
+        LogManager.addListener(object : LogListener {
+            override fun onLog(clazz: Class<*>, message: String?, throwable: Throwable?) {
+                dlog("[JS/${clazz.simpleName}] ${message ?: ""}")
+                if (throwable != null) dlog("[JS/${clazz.simpleName}] ex: ${throwable.message}")
+            }
+            override fun onError(clazz: Class<*>, message: String?, throwable: Throwable?) {
+                dlog("[JS-ERR/${clazz.simpleName}] ${message ?: ""}")
+                if (throwable != null) dlogError("[JS-ERR/${clazz.simpleName}]", throwable)
+            }
+        })
+    }
+
     private fun dlogError(msg: String, t: Throwable) {
         val sw = StringWriter()
         t.printStackTrace(PrintWriter(sw))
@@ -161,6 +192,7 @@ object SteamDepotDownloader {
     ) {
         activeDownloads[appId] = Unit
         initDebugLog(ctx, truncate = attempt == 0)
+        wireJavaSteamLog()   // surface JavaSteam CM/CDN internals into steam_debug.txt
         dlog("=== Starting install: appId=$appId ===")
 
         val repo = SteamRepository.getInstance()
