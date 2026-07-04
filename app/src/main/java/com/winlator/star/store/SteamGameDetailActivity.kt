@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -1026,7 +1027,13 @@ private fun ExePickerDialogGame(
         onDismissRequest = onDismiss,
         title = { Text("Select executable for \"$gameName\"") },
         text = {
-            Column {
+            // HL2 (and many Source games) ship dozens of bin/*.exe SDK tools, so this list can be
+            // long — bound its height and make it scrollable, or the real game exe is unreachable.
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
                 candidates.forEach { path ->
                     val f = java.io.File(path)
                     val parent = f.parentFile
