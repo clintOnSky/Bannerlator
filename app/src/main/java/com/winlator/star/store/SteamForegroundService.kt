@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
+import com.winlator.star.store.download.DownloadRegistry
 
 /**
  * Foreground service that keeps the Steam CM connection alive while downloading
@@ -75,6 +76,13 @@ class SteamForegroundService : Service() {
         Log.i(TAG, "Service started")
 
         SteamRepository.getInstance().initialize(this)
+
+        // Cross-store Download Manager (Phase 2): bring up the store-agnostic registry and
+        // seed it with the already-installed Steam library so its Library section is
+        // populated on first open. Both are idempotent; the DB is ready post-initialize.
+        DownloadRegistry.init(this)
+        SteamLibrarySync.seed(this)
+
         SteamRepository.getInstance().connect()
 
         return START_STICKY   // restart if killed by OS

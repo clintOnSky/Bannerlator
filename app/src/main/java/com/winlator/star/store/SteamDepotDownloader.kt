@@ -4,6 +4,10 @@ import android.content.Context
 import android.os.PowerManager
 import android.util.Log
 import com.winlator.star.BuildConfig
+import com.winlator.star.store.download.DownloadEntry
+import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadState
+import com.winlator.star.store.download.Store
 import `in`.dragonbra.javasteam.depotdownloader.DepotDownloader
 import `in`.dragonbra.javasteam.depotdownloader.IDownloadListener
 import `in`.dragonbra.javasteam.depotdownloader.data.AppItem
@@ -230,11 +234,10 @@ object SteamDepotDownloader {
         val paused        = AtomicBoolean(false)
         val downloaderRef = AtomicReference<DepotDownloader?>(null)
 
-        CoroutineScope(Dispatchers.IO).launch {
-            runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier, debugLog, isResume)
-        }
-
-        return DownloadControl(
+        // Built BEFORE the launch so the Download Manager registry entry (created inside
+        // runInstall, once the game's name is loaded) can wire its pause/cancel handles
+        // straight to these Runnables — the same controls the Steam detail page uses.
+        val control = DownloadControl(
             cancel = Runnable {
                 if (cancelled.compareAndSet(false, true)) {
                     paused.set(false)  // cancel overrides pause
@@ -249,6 +252,12 @@ object SteamDepotDownloader {
                 }
             }
         )
+
+        CoroutineScope(Dispatchers.IO).launch {
+            runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier, debugLog, isResume, control = control)
+        }
+
+        return control
     }
 
     // -------------------------------------------------------------------------
@@ -265,6 +274,7 @@ object SteamDepotDownloader {
         debugLog: Boolean = false,
         isResume: Boolean = false,
         attempt: Int = 0,
+        control: DownloadControl? = null,
     ) {
         // One gate for all verbose diagnostics: on in debug builds, or when the user ticked
         // "Log debug session" for this download. Off ⇒ steam_debug.txt is never created (no 4 MB
@@ -375,6 +385,33 @@ object SteamDepotDownloader {
         val installTotalRunning  = AtomicLong(installTotal)
         val downloadTotalRunning = AtomicLong(downloadTotalSeed)
 
+        // Cross-store Download Manager: publish this download as a live entry into the
+        // store-agnostic registry (Phase 2). Purely additive — the DownloadProgress:/
+        // DownloadComplete: emits below are untouched and still drive the detail page.
+        // pause/cancel ride the same DownloadControl the detail page uses; cover is the
+        // appId (GameCoverArt resolves Steam art by appId). On a session-recovery retry
+        // (attempt>0) the entry already exists, so just flip it back to DOWNLOADING
+        // rather than resetting its byte counters to the seed.
+        val dmKey = "${Store.STEAM}:$appId"
+        if (attempt == 0 && DownloadRegistry.get(dmKey) == null) {
+            DownloadRegistry.upsert(DownloadEntry(
+                store = Store.STEAM,
+                id = appId.toString(),
+                name = row.name,
+                cover = appId.toString(),
+                state = DownloadState.DOWNLOADING,
+                installDone = installBase,
+                installTotal = installTotal,
+                downloadDone = downloadBase,
+                downloadTotal = downloadTotalSeed,
+                supportsPause = true,
+                pause = control?.let { c -> { c.pause.run() } },
+                cancel = control?.let { c -> { c.cancel.run() } },
+            ))
+        } else {
+            DownloadRegistry.update(dmKey) { it.copy(state = DownloadState.DOWNLOADING) }
+        }
+
         // Build the 4-field progress event: install pair + download pair.
         fun emitProgress(iDone: Long, iTotal: Long, dDone: Long, dTotal: Long) {
             repo.emit("DownloadProgress:$appId:$iDone:$iTotal:$dDone:$dTotal")
@@ -480,6 +517,17 @@ object SteamDepotDownloader {
                         "download=${fmtSize(downloadDone)}/${fmtSize(dTotal)}")
                 emitProgress(installDone, iTotal, downloadDone, dTotal)
                 db.updateDownloadProgress(appId, installDone)
+                // Mirror the exact same figures into the Download Manager registry (no recompute).
+                DownloadRegistry.update(dmKey) {
+                    it.copy(
+                        state = DownloadState.DOWNLOADING,
+                        pct = pct,
+                        installDone = installDone,
+                        installTotal = iTotal,
+                        downloadDone = downloadDone,
+                        downloadTotal = dTotal,
+                    )
+                }
 
                 // FGS notification: honest "Downloading <game> — N%", throttled to whole-percent
                 // changes so chunk spam doesn't thrash the notification. Reverted to the connection
@@ -526,6 +574,17 @@ object SteamDepotDownloader {
                 emitProgress(iTotal, iTotal, dTotal, dTotal)
                 db.markInstalled(appId, installDir.absolutePath, if (finalInstall > 0L) finalInstall else iTotal)
                 repo.emit("DownloadComplete:$appId")
+                // Terminal success → INSTALLED. The registry persists INSTALLED rows to the
+                // durable library, so this game survives process death in the Library section.
+                DownloadRegistry.update(dmKey) {
+                    it.copy(
+                        state = DownloadState.INSTALLED,
+                        pct = 100,
+                        installPath = installDir.absolutePath,
+                        installDone = if (finalInstall > 0L) finalInstall else iTotal,
+                        installTotal = iTotal,
+                    )
+                }
             }
 
             override fun onDownloadFailed(item: DownloadItem, error: Throwable) {
@@ -620,12 +679,17 @@ object SteamDepotDownloader {
                         dlog("finally: paused=true — marking DL_PAUSED")
                         db.markDownloadPaused(appId, lastInstallDone.get())
                         repo.emit("DownloadPaused:$appId")
+                        DownloadRegistry.update(dmKey) { it.copy(state = DownloadState.PAUSED) }
                     }
                     cancelled.get() -> {
                         // Cancel path: delete files + row
                         dlog("finally: cancelled=true — ensuring DownloadCancelled emitted")
                         db.deleteDownload(appId)
                         repo.emit("DownloadCancelled:$appId")
+                        // Files + DB row are gone; drop the registry row too (mark then remove so
+                        // any collector sees the CANCELLED transition before it disappears).
+                        DownloadRegistry.update(dmKey) { it.copy(state = DownloadState.CANCELLED) }
+                        DownloadRegistry.remove(dmKey)
                     }
                     else -> {
                         // Genuine failure. Before surfacing it, give the session a chance to come back
@@ -666,7 +730,7 @@ object SteamDepotDownloader {
         if (retryAsResume) {
             dlog("Retrying install for appId=$appId (attempt ${attempt + 1} → ${attempt + 2}) as resume")
             runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier, debugLog,
-                    isResume = true, attempt = attempt + 1)
+                    isResume = true, attempt = attempt + 1, control = control)
         }
     }
 
@@ -678,6 +742,10 @@ object SteamDepotDownloader {
         SteamRepository.getInstance().database.markDownloadFailed(appId, reason)
         SteamRepository.getInstance().emit("DownloadFailed:$appId:$reason")
         Log.e(TAG, "DownloadFailed $appId: $reason")
+        // Central failure sink — covers the pre-flight checks, the false-complete guard, and
+        // the finally's genuine-failure path. No-op if no registry entry exists yet (early
+        // pre-flight failures fire before the entry is upserted).
+        DownloadRegistry.update("${Store.STEAM}:$appId") { it.copy(state = DownloadState.FAILED, error = reason) }
     }
 
     private fun fmtSize(bytes: Long): String = when {
