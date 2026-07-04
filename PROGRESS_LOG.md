@@ -1,6 +1,6 @@
 # Star-Compose — Progress Log
 
-> **⏸️ CURRENT STATE (2026-07-04) — user device-testing.** Branch `feat/download-manager` (off main, NOT merged). On it: Steam Download Manager v1 (DEVICE-PROVEN) + two-bar distinctness fix + default-landing-screen Settings option. **Device has v1 build `c826c79` installed.** **PENDING build `28715078107`** (two-bar + landing screen) → deliver standard APK to `/storage/emulated/0/Download/` on green. Steam/Goldberg already merged to main (`c89dc03`, no release, vc37/2.2.2). PARKED: Epic/GOG/Amazon registry wiring. NEXT: user sign-off → merge branch→main. Detail in entries below + memory `project_bannerlator_download_manager`.
+> **⏸️ CURRENT STATE (2026-07-04) — user device-testing.** Branch `feat/download-manager` (off main, NOT merged). On it: Steam Download Manager v1 (DEVICE-PROVEN) + two-bar distinctness fix + default-landing-screen Settings option. v1 build `c826c79` DEVICE-PROVEN (user: "works well"). **✅ Combined build `28715078107` GREEN → delivered `bannerlator-dlmgr-twobar-landing-52e7e38-standard.apk` (sha `e0b173cd9f01`)** — two-bar distinctness + landing-screen setting; user testing now. Steam/Goldberg already merged to main (`c89dc03`, no release, vc37/2.2.2). PARKED: Epic/GOG/Amazon registry wiring. NEXT: user sign-off → merge branch→main. Detail in entries below + memory `project_bannerlator_download_manager`.
 
 ---
 
