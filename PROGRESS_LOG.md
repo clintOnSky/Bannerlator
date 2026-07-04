@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-07-04 — ✅ DEVICE TEST PASSED: OOM gone, tiered speed confirmed (HL1) — heavier stress test still pending
+
+> Installed `ad9a4bd` standard APK, ran a Steam download on device (`com.winlator.banner`). **Result: clean, no OOM.** Evidence pulled via root bridge → `~/scratchpad/steam_debug_hl2_tiered.txt` (4 MB / 32,685 lines) + `~/scratchpad/steam_session_hl2_tiered.txt`.
+> - **OOM ELIMINATED:** zero `OutOfMemory` / `Failed to allocate` / `growth limit` / `Parent job is Cancelling` — the Batch-2 crash signatures are all absent.
+> - **Tiered config fired correctly:** picked **Medium** → log `Constructing DepotDownloader(tier=16, cores=8, maxDownloads=9, maxDecompress=3, maxFileWrites=3, ...)` — exact `cores × ratio` math; `maxFileWrites=3` vs the old crash-causing 100.
+> - **Clean completion:** `=== Download complete: appId=70 ===` → `getCompletion() returned` → `=== runInstall() finished ===`; no false-complete trip, wakelock acquired 11:21:06 → released 11:23:32, session stayed ONLINE (no `LogonSessionReplaced`/reconnect during DL). The "42 errors" grep = false positives (HL filenames `error.wav`/`failed.wav`/`containfail.wav`).
+> **⚠️ Caveat — this was a LIGHT load:** appId **70 = Half-Life 1** (not HL2/220), and the log shows mostly a **validation pass of already-present files + a ~48 MB delta** (Depot 2 = 47.5 MB), done in ~2.5 min — lighter than the fresh ~8.4 GB HL2 download that originally OOM'd, and on **Medium** not **Fast/Blazing**. Proves the decompress/write pipeline completes with zero OOM, but not yet the sustained high-concurrency case.
+> **NEXT (user will run):** one fresh LARGE download on a HIGH tier — HL2 (220) fresh, or delete+re-pull, on **Fast/Blazing** — watching peak RAM. If clean → Batch 3 device-PROVEN → merge-to-main gate.
+
+---
+
 ## 2026-07-04 — ✅ OOM fix shipped + GameNative-style 4-tier download speed → standard APK delivered, awaiting device test
 
 > Two commits on `feat/steam-goldberg-patcher`:
