@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-07-04 — 🎉 MERGED TO MAIN: `feat/steam-goldberg-patcher` → main (fast-forward, NO release cut)
+
+> All 3 merge-prep tasks done → **merged the whole Steam/Goldberg branch to `main`** via fast-forward (main was a strict ancestor). `main`: `cd7082c` → **`c89dc03`**. Pushed.
+> - **What landed on main:** the entire multi-week arc — Steam store M3 restyle, Goldberg auto-patch, session-hardening saga, Batch 1/2/3 download fixes (library-sync batching, wakelock, the OOM fix), GameNative-style 4-tier download speed, the per-download debug-log toggle, redactor hardening + UI warning, Steam/Epic/GOG logcat PII cleanups, and the cosmetic depot-byte log fix.
+> - **⚠️ NO release/pre-release cut (per user):** versionCode **stays 37**, versionName **2.2.2** (unchanged). vc38 pre-release deferred to a later, explicit decision.
+> - **Artifact-only build on main dispatched:** run `28712845487` (per user — build only, no tag/release).
+> - `feat/steam-goldberg-patcher` branch left in place (not deleted).
+> **NEXT:** cross-store **Download Manager** feature ([[project_bannerlator_download_manager]]). When a release is eventually cut, **hand out credits** (upstream OSS: JavaSteam/GameNative/Pluvia/Goldberg-gbe_fork + our own work → GitHub release notes + repo credits).
+
+---
+
 ## 2026-07-04 — 🔧 MERGE PREP #1: per-download "Log debug session" toggle (gate verbose diagnostics)
 
 > First merge-prep task done (`89b90b8`). Verbose Steam logging (the ~33k-line `steam_debug.txt` firehose + JavaSteam `LogManager` bridge + engine `debug=true`) was always-on for every user; now gated behind **one switch**: `verbose = BuildConfig.DEBUG || debugLog`, where `debugLog` = a new **per-download checkbox** on the speed-picker dialog ("Log debug session", unchecked by default, not persisted).
