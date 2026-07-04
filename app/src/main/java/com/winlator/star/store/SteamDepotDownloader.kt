@@ -3,6 +3,7 @@ package com.winlator.star.store
 import android.content.Context
 import android.os.PowerManager
 import android.util.Log
+import com.winlator.star.BuildConfig
 import `in`.dragonbra.javasteam.depotdownloader.DepotDownloader
 import `in`.dragonbra.javasteam.depotdownloader.IDownloadListener
 import `in`.dragonbra.javasteam.depotdownloader.data.AppItem
@@ -177,6 +178,10 @@ object SteamDepotDownloader {
     }
 
     private fun dlogError(msg: String, t: Throwable) {
+        // Always-on breadcrumb: surface the error summary at WARN level regardless of verbose, so a
+        // failed download is never totally silent even when the steam_debug.txt firehose is off.
+        // (dlog re-redacts + writes the full stack to file only when verbose opened the log.)
+        Log.w(TAG, "${SteamLogRedactor.redact("$msg: ${t.message}")}")
         val sw = StringWriter()
         t.printStackTrace(PrintWriter(sw))
         dlog("$msg: ${t.message}")
@@ -197,24 +202,36 @@ object SteamDepotDownloader {
      * Start a fresh install. Returns a DownloadControl with cancel + pause Runnables.
      * @param speedTier download-speed tier key (8=Slow / 16=Medium / 24=Fast / 32=Blazing);
      *   fed to [DownloadSpeedConfig] to derive maxDownloads/maxDecompress/maxFileWrites.
+     * @param debugLog when true (or in a debug build) writes the verbose steam_debug.txt firehose +
+     *   JavaSteam-internal bridge for this download. Off = logcat-only; failures still leave a trace.
      */
-    fun installApp(appId: Int, ctx: Context, speedTier: Int = DownloadSpeedConfig.DEFAULT_TIER): DownloadControl =
-        buildControl(appId, ctx, speedTier, isResume = false)
+    fun installApp(
+        appId: Int,
+        ctx: Context,
+        speedTier: Int = DownloadSpeedConfig.DEFAULT_TIER,
+        debugLog: Boolean = false,
+    ): DownloadControl =
+        buildControl(appId, ctx, speedTier, debugLog, isResume = false)
 
     /**
      * Resume a previously paused install. Keeps the existing DB row (bytes intact).
      * DepotDownloader will re-verify and skip already-written chunks where possible.
      */
-    fun resumeApp(appId: Int, ctx: Context, speedTier: Int = DownloadSpeedConfig.DEFAULT_TIER): DownloadControl =
-        buildControl(appId, ctx, speedTier, isResume = true)
+    fun resumeApp(
+        appId: Int,
+        ctx: Context,
+        speedTier: Int = DownloadSpeedConfig.DEFAULT_TIER,
+        debugLog: Boolean = false,
+    ): DownloadControl =
+        buildControl(appId, ctx, speedTier, debugLog, isResume = true)
 
-    private fun buildControl(appId: Int, ctx: Context, speedTier: Int, isResume: Boolean): DownloadControl {
+    private fun buildControl(appId: Int, ctx: Context, speedTier: Int, debugLog: Boolean, isResume: Boolean): DownloadControl {
         val cancelled     = AtomicBoolean(false)
         val paused        = AtomicBoolean(false)
         val downloaderRef = AtomicReference<DepotDownloader?>(null)
 
         CoroutineScope(Dispatchers.IO).launch {
-            runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier, isResume)
+            runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier, debugLog, isResume)
         }
 
         return DownloadControl(
@@ -245,13 +262,21 @@ object SteamDepotDownloader {
         paused: AtomicBoolean,
         downloaderRef: AtomicReference<DepotDownloader?>,
         speedTier: Int = DownloadSpeedConfig.DEFAULT_TIER,
+        debugLog: Boolean = false,
         isResume: Boolean = false,
         attempt: Int = 0,
     ) {
+        // One gate for all verbose diagnostics: on in debug builds, or when the user ticked
+        // "Log debug session" for this download. Off ⇒ steam_debug.txt is never created (no 4 MB
+        // firehose) and the JavaSteam bridge isn't wired; logcat + the always-on steam_session.txt
+        // still record enough that a failure is never totally silent (see dlogError/emitFailed).
+        val verbose = BuildConfig.DEBUG || debugLog
         activeDownloads[appId] = Unit
-        initDebugLog(ctx, truncate = attempt == 0)
-        wireJavaSteamLog()   // surface JavaSteam CM/CDN internals into steam_debug.txt
-        dlog("=== Starting install: appId=$appId ===")
+        if (verbose) {
+            initDebugLog(ctx, truncate = attempt == 0)
+            wireJavaSteamLog()   // surface JavaSteam CM/CDN internals into steam_debug.txt
+        }
+        dlog("=== Starting install: appId=$appId (verbose=$verbose) ===")
 
         val repo = SteamRepository.getInstance()
         val steamClient = repo.steamClient
@@ -367,12 +392,12 @@ object SteamDepotDownloader {
         val maxDecompress = speedConfig.maxDecompress
         val maxFileWrites = speedConfig.maxFileWrites
         dlog("Constructing DepotDownloader(tier=$speedTier, cores=$cores, maxDownloads=$maxDownloads, " +
-                "maxDecompress=$maxDecompress, maxFileWrites=$maxFileWrites, androidEmulation=true, debug=true)")
+                "maxDecompress=$maxDecompress, maxFileWrites=$maxFileWrites, androidEmulation=true, debug=$verbose)")
         val downloader = try {
             DepotDownloader(
                 steamClient,
                 licenses,
-                true,          // debug
+                verbose,       // debug (gated: BuildConfig.DEBUG || user "Log debug session")
                 false,         // useLanCache
                 maxDownloads,  // maxDownloads (cores × tier download ratio)
                 maxDecompress, // maxDecompress (cores × tier decompress ratio — bounds the big buffers)
@@ -631,7 +656,7 @@ object SteamDepotDownloader {
         // MAX_SESSION_RETRIES; re-enters as a resume so already-downloaded files are reused.
         if (retryAsResume) {
             dlog("Retrying install for appId=$appId (attempt ${attempt + 1} → ${attempt + 2}) as resume")
-            runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier,
+            runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier, debugLog,
                     isResume = true, attempt = attempt + 1)
         }
     }

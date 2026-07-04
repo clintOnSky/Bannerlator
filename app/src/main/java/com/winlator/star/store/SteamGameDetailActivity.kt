@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -184,12 +185,12 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                             else -> 2  // Fast
                         },
                         onDismiss = { showSpeedPicker = false },
-                        onDownload = { tier ->
+                        onDownload = { tier, debugLog ->
                             showSpeedPicker = false
                             lastSpeedTier = tier
                             installBtnEnabled = false
                             installBtnText = "Starting…"
-                            downloadHandle = SteamDepotDownloader.installApp(appId, applicationContext, lastSpeedTier)
+                            downloadHandle = SteamDepotDownloader.installApp(appId, applicationContext, lastSpeedTier, debugLog)
                         },
                     )
                 }
@@ -976,7 +977,7 @@ private fun InfoChip(label: String) {
 private fun DownloadSpeedPickerDialog(
     selectedIndex: Int,
     onDismiss: () -> Unit,
-    onDownload: (speedTier: Int) -> Unit,
+    onDownload: (speedTier: Int, debugLog: Boolean) -> Unit,
 ) {
     // Tiers mirror GameNative: cores × ratio scales download + decompress concurrency.
     // Higher tiers download faster but use more RAM/CPU during decompression.
@@ -987,6 +988,8 @@ private fun DownloadSpeedPickerDialog(
         "Blazing — fastest, highest RAM/CPU" to DownloadSpeedConfig.TIER_BLAZING,
     )
     var selected by remember { mutableIntStateOf(selectedIndex) }
+    // Per-download, not persisted — defaults off each time (scoped to this one download).
+    var debugLog by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1013,10 +1016,38 @@ private fun DownloadSpeedPickerDialog(
                         )
                     }
                 }
+
+                Spacer(Modifier.height(8.dp))
+                // Verbose diagnostics toggle — off by default; writes a detailed steam_debug.txt
+                // for THIS download only. Failures are always traced to logcat regardless.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { debugLog = !debugLog }
+                        .padding(vertical = 4.dp),
+                ) {
+                    Checkbox(
+                        checked = debugLog,
+                        onCheckedChange = { debugLog = it },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Log debug session",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "Writes a detailed log to help diagnose download problems.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onDownload(options[selected].second) }) {
+            TextButton(onClick = { onDownload(options[selected].second, debugLog) }) {
                 Text("Download")
             }
         },
