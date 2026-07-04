@@ -41,7 +41,9 @@ import androidx.lifecycle.lifecycleScope
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadScope
 import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.formatDownloadSize
 import com.winlator.star.store.download.INSTALLED_GREEN
 import com.winlator.star.store.download.InfoChip
 import com.winlator.star.store.download.Store
@@ -183,7 +185,10 @@ class AmazonGameDetailActivity : ComponentActivity() {
     }
 
     override fun onBackPressed() {
-        cancelDownload?.invoke()
+        // Leaving the detail page no longer cancels an in-flight download: it keeps running on
+        // DownloadScope with the foreground-service notification, and can still be cancelled from
+        // the Download Manager (reachable by tapping that notification). This is the whole point
+        // of the survive-backgrounding change — backing out mid-install used to silently abort it.
         super.onBackPressed()
     }
 
@@ -232,8 +237,13 @@ class AmazonGameDetailActivity : ComponentActivity() {
             productSku = this@AmazonGameDetailActivity.productSku ?: ""
         }
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            val token = AmazonCredentialStore.getValidAccessToken(this@AmazonGameDetailActivity)
+        // Run on the process-lifetime DownloadScope (NOT lifecycleScope): paired with the
+        // DownloadForegroundService that StoreDownloadHooks starts, the download now survives
+        // this Activity being destroyed / the app being backgrounded. Use applicationContext
+        // throughout so the coroutine never pins the Activity.
+        val appCtx = applicationContext
+        DownloadScope.io.launch {
+            val token = AmazonCredentialStore.getValidAccessToken(appCtx)
             if (token == null) {
                 withContext(Dispatchers.Main) {
                     onInstallError("Login required")
@@ -263,11 +273,10 @@ class AmazonGameDetailActivity : ComponentActivity() {
             )
 
             val ok = AmazonDownloadManager.install(
-                this@AmazonGameDetailActivity, game, token, installDir,
-                { dl, total, file ->
+                appCtx, game, token, installDir,
+                { dl, total, _ ->
                     if (cancelled.get()) return@install
                     val pct = if (total > 0) (dl * 100L / total).toInt() else 0
-                    val name = if (!file.isNullOrEmpty()) file else "Downloading\u2026"
                     // Mirror the exact figures into the DL manager (real aggregate bytes).
                     StoreDownloadHooks.tick(
                         store = Store.AMAZON,
@@ -276,9 +285,15 @@ class AmazonGameDetailActivity : ComponentActivity() {
                         installDone = dl,
                         installTotal = total,
                     )
-                    runOnUiThread {
+                    // Detail-page label mirrors the Manager card ("$pct%  (done / total)");
+                    // the raw archive filename (e.g. "level23") is no longer surfaced. Guarded:
+                    // this coroutine can now outlive the Activity, so only touch UI while it's live.
+                    val label = if (pct <= 0) "Downloading\u2026"
+                        else "$pct%  (${formatDownloadSize(dl)} / ${formatDownloadSize(total)})"
+                    if (!isDestroyed && !isFinishing) runOnUiThread {
+                        if (isDestroyed || isFinishing) return@runOnUiThread
                         progressValue = pct
-                        progressLabel = name
+                        progressLabel = label
                     }
                 },
                 { cancelled.get() },
@@ -315,11 +330,22 @@ class AmazonGameDetailActivity : ComponentActivity() {
             } else {
                 val candidates = exeFiles.map { it.absolutePath }
                 withContext(Dispatchers.Main) {
-                    showExePicker(candidates) { selected ->
-                        val chosen = if (!selected.isNullOrEmpty()) selected
-                        else exeFiles[0].absolutePath
-                        prefs!!.edit().putString("amazon_exe_$productId", chosen).apply()
+                    // The picker is an AlertDialog on THIS Activity — it would crash with a
+                    // BadToken if the download outlived the detail page. When we're gone, just
+                    // auto-pick the best-scored exe (list is already sorted best-first) so the
+                    // install still completes and lands in the Library.
+                    if (isDestroyed || isFinishing) {
+                        prefs!!.edit()
+                            .putString("amazon_exe_$productId", exeFiles[0].absolutePath)
+                            .apply()
                         onInstallComplete()
+                    } else {
+                        showExePicker(candidates) { selected ->
+                            val chosen = if (!selected.isNullOrEmpty()) selected
+                            else exeFiles[0].absolutePath
+                            prefs!!.edit().putString("amazon_exe_$productId", chosen).apply()
+                            onInstallComplete()
+                        }
                     }
                 }
             }
@@ -356,7 +382,9 @@ class AmazonGameDetailActivity : ComponentActivity() {
         launchBtnEnabled = true
         setExeBtnVisible = true
         productId?.let { StoreDownloadHooks.markFailed(Store.AMAZON, it, msg) }
-        Toast.makeText(this, "Error: $msg", Toast.LENGTH_LONG).show()
+        // applicationContext: this handler can run after the Activity is gone (download now
+        // outlives it), and the registry/notification updates above must still happen.
+        Toast.makeText(applicationContext, "Error: $msg", Toast.LENGTH_LONG).show()
     }
 
     private fun onInstallCancelled() {

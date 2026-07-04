@@ -13,6 +13,30 @@
 
 ---
 
+## 2026-07-04 — 🔔 Cross-store download NOTIFICATION + background survival (device-test feedback on restyle build)
+
+> **Restyle+Amazon build `7ec2b50` device-tested by user (3 screenshots, Dread Templar / Amazon).** ✅ Restyle solid (detail page matches Steam layout + orange Amazon badge); ✅ Amazon→DownloadRegistry end-to-end PROVEN: ⬇ header "1" badge lit on download start, Downloads&Library shows live Amazon row `20% (810.2 MB / 3.9 GB)` + Cancel, library seeded (FlatOut + HL2). **Gap the user flagged:** Amazon downloads don't appear in the **system notification shade like Steam does**, and (root-caused) don't survive backgrounding.
+>
+> **Diagnosis:** Steam downloads run *inside* `SteamForegroundService` + call `SteamForegroundService.setStatusText(...)` each tick → ongoing shade notification + process kept alive. Amazon ran on `AmazonGameDetailActivity`'s **`lifecycleScope`** (dies with the Activity) with progress only into the in-app registry — **no FGS, no notification**. Two gaps: notification AND process-liveness. Also the "level23" label leak = detail page showed the raw archive filename (`progressLabel = name`) instead of `$pct%`.
+>
+> **User decisions (AskUserQuestion):** (a) **generalize at the shared `StoreDownloadHooks` seam** so GOG/Epic inherit it; (b) bundle all 3 polish fixes (level23→%, add %/size to detail bar, fix blank cover art).
+>
+> **Built (native-steam-engineer, NOT yet committed at time of writing — see next commit):**
+> - NEW `download/DownloadForegroundService.kt` — store-agnostic FGS, own "Downloads" channel (`downloads_channel`, IMPORTANCE_LOW), NOTIF_ID `9002` (≠ Steam's 9001), ongoing progress notif, tap→`DownloadManagerActivity`, `dataSync` type, `ConcurrentHashMap<key,Active(text,seq)>` source of truth (1→"Downloading", N→"N downloads"+most-recent line), self-stops when active set empties, sticky-restart-with-empty-map self-stops.
+> - NEW `download/DownloadScope.kt` — `object DownloadScope { val io = CoroutineScope(SupervisorJob()+Dispatchers.IO) }` process-lifetime scope.
+> - `StoreDownloadHooks.kt` — register/tick push `DownloadForegroundService.setProgress(key,line)`; markInstalled/Failed/Cancelled call `finish(key)`. Line built from registry entry via shared formatter.
+> - `DownloadRegistry.kt` — `appContext()` accessor (app ctx captured in `init`, leak-safe).
+> - `DownloadModels.kt` — promoted shared `formatDownloadSize(Long)` (manager's GB/MB/KB tiering) so card + detail label + notif read identically.
+> - `AmazonGameDetailActivity.kt` — download moved `lifecycleScope`→`DownloadScope.io`, `applicationContext` into `AmazonDownloadManager.install`, UI writes guarded `!isDestroyed&&!isFinishing`, exe-picker auto-picks best-scored exe if Activity gone (BadToken guard), `onBackPressed` no longer aborts download, error Toast uses app ctx; polish 4a/4b (`"$pct%  (done / total)"`, "Downloading…" at 0%).
+> - `DownloadManagerActivity.kt` — new `DownloadCoverArt` (Steam=appId loader, others=Coil URL, graceful placeholder) fixes blank Amazon cover (4c); `fmtSizeDm`→shared formatter.
+> - `AndroidManifest.xml` — `FOREGROUND_SERVICE_DATA_SYNC` perm + `<service DownloadForegroundService dataSync>`.
+>
+> Compile-sane review passed (`DownloadRegistry.get` exists; Kotlin/Java call direction clean — Java engine never calls the Kotlin object). **NEXT:** commit as The412Banner → CI build → deliver standard APK → device-test the shade notification + background survival + cover + label polish (checklist below).
+>
+> **Device-test checklist:** (1) Amazon install → live ongoing shade notif "Downloading … — X% (…/…)", no sound; (2) tap notif → opens Downloads&Library; (3) Home mid-DL → keeps progressing; (4) Back off detail page mid-DL → continues (used to abort); (5) Cancel from Manager stops it + clears notif; (6) Cancel from detail page still works; (7) complete → INSTALLED row + notif auto-dismiss; (8) Amazon cover renders (no white box); (9) detail label = `20% (810.2 MB / 3.9 GB)`, never "level23"; (10) Steam notif still independent (channel 9001).
+
+---
+
 ## 2026-07-04 — ✅ Black-box fix device-proven + 🐞→✅ Bug-1 (size-text >100%) fixed
 
 > **Black-box fix (`eb7dd55`) DEVICE-PROVEN (user, latest screenshot):** installed the delivered APK, uninstalled a game, and the `UninstallResultBar` renders real text — no more empty black box. Last open verification on the branch is cleared; all Steam-side uninstall feedback works end-to-end.

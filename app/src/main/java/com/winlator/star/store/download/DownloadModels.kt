@@ -13,6 +13,18 @@ package com.winlator.star.store.download
 enum class Store { STEAM, EPIC, GOG, AMAZON }
 
 /**
+ * Single, store-agnostic human byte formatter for the whole download stack — the exact
+ * tiering the Download Manager card uses (GB / MB / KB). Shared here so the manager card
+ * text, the detail-page progress label, and the shade notification all read identically
+ * ("810.2 MB", "3.9 GB") instead of each store re-inventing a slightly different format.
+ */
+fun formatDownloadSize(bytes: Long): String = when {
+    bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
+    bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
+    else                    -> "%.0f KB".format(bytes / 1024.0)
+}
+
+/**
  * Lifecycle of a single download row.
  *
  * QUEUED/DOWNLOADING/PAUSED are the *active* states (in-memory only). INSTALLED is

@@ -51,11 +51,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.winlator.star.store.compose.AddResultDialog
 import com.winlator.star.store.compose.AddShortcutResult
 import com.winlator.star.store.compose.AddToShortcutsRequest
@@ -66,6 +70,7 @@ import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.Store
 import com.winlator.star.store.download.StoreStyle
+import com.winlator.star.store.download.formatDownloadSize
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 import java.io.File
@@ -372,9 +377,8 @@ private fun DownloadCard(
                 .fillMaxWidth()
                 .padding(12.dp),
         ) {
-            // Reuse the Steam poster loader. Steam entry.cover holds the appId string.
-            GameCoverArt(
-                appId = entry.cover?.toIntOrNull() ?: 0,
+            DownloadCoverArt(
+                entry = entry,
                 modifier = Modifier
                     .size(width = 60.dp, height = 80.dp)
                     .clip(RoundedCornerShape(6.dp)),
@@ -545,6 +549,40 @@ private fun ActiveContent(
     }
 }
 
+/**
+ * Store-aware cover loader for a Manager card.
+ *
+ * Steam art is derived from the appId (its `cover` holds the appId string), so Steam rows
+ * reuse [GameCoverArt]. Every other store (Amazon now; GOG / Epic later) stores a real image
+ * URL in `cover`, which [GameCoverArt] can't render — it only knows Steam's appId→URL scheme,
+ * so an Amazon row was showing a blank/× box. For those we load the URL directly via Coil,
+ * falling back to a themed placeholder box when the URL is genuinely absent.
+ */
+@Composable
+private fun DownloadCoverArt(entry: DownloadEntry, modifier: Modifier) {
+    if (entry.store == Store.STEAM) {
+        GameCoverArt(appId = entry.cover?.toIntOrNull() ?: entry.id.toIntOrNull() ?: 0, modifier = modifier)
+        return
+    }
+    val coverUrl = entry.cover
+    if (coverUrl.isNullOrEmpty()) {
+        Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant))
+        return
+    }
+    val ctx = LocalContext.current
+    Box(
+        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            model = ImageRequest.Builder(ctx).data(coverUrl).crossfade(true).build(),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
+
 /** Small store-tinted chip so a mixed-store list reads at a glance. */
 @Composable
 private fun StoreBadge(store: Store) {
@@ -600,8 +638,5 @@ private fun ExePickerDialogDm(
 
 private val INSTALLED_GREEN = Color(0xFF4CAF50)
 
-private fun fmtSizeDm(bytes: Long): String = when {
-    bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
-    bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
-    else                    -> "%.0f KB".format(bytes / 1024.0)
-}
+// One shared byte formatter across the download stack (card text, detail label, shade line).
+private fun fmtSizeDm(bytes: Long): String = formatDownloadSize(bytes)

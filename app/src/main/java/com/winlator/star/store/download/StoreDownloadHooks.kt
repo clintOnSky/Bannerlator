@@ -17,11 +17,37 @@ package com.winlator.star.store.download
  * so an out-of-order progress/complete tick can never NPE. ARCHITECTURE: this stays in
  * the `download` package and imports zero store engines — the store Activities import it,
  * never the reverse.
+ *
+ * As well as feeding the in-app Download Manager, every call here also drives the shared
+ * [DownloadForegroundService] so all non-Steam stores get a shade notification + a process
+ * kept alive across backgrounding, for free: [registerDownload]/[tick] push the notification
+ * line, and the terminal transitions ([markInstalled]/[markCancelled]/[markFailed]) drop it.
  */
 object StoreDownloadHooks {
 
     /** Store-qualified registry key — MUST match [DownloadEntry.key] ("AMAZON:$id"). */
     private fun key(store: Store, id: String): String = "$store:$id"
+
+    /**
+     * Build the shade line from the entry's current state and push it to the foreground
+     * service. Reads the entry back from the registry (populated by the caller immediately
+     * before) so name + pct + bytes are always in sync with what the Manager card shows.
+     * No-op until [DownloadRegistry.init] has captured an application Context.
+     */
+    private fun pushNotification(store: Store, id: String) {
+        val k = key(store, id)
+        val e = DownloadRegistry.get(k) ?: return
+        val line = buildString {
+            append(e.name.ifEmpty { "${e.store} ${e.id}" })
+            append(" — ").append(e.pct).append('%')
+            if (e.installTotal > 0L) {
+                append("  (")
+                append(formatDownloadSize(e.installDone)).append(" / ")
+                append(formatDownloadSize(e.installTotal)).append(')')
+            }
+        }
+        DownloadForegroundService.setProgress(k, line)
+    }
 
     /**
      * Publish a freshly-started download as a live DOWNLOADING entry. Wires the store's
@@ -53,6 +79,10 @@ object StoreDownloadHooks {
                 cancel = cancel,
             )
         )
+        // Bring up the shared FGS (keeps the process alive past Activity death) and post the
+        // first shade line. start() is idempotent; both no-op cleanly before init() ran.
+        DownloadRegistry.appContext()?.let { DownloadForegroundService.start(it) }
+        pushNotification(store, id)
     }
 
     /**
@@ -80,6 +110,7 @@ object StoreDownloadHooks {
                 downloadTotal = downloadTotal,
             )
         }
+        pushNotification(store, id)
     }
 
     /**
@@ -97,6 +128,7 @@ object StoreDownloadHooks {
                 installTotal = if (bytes > 0L) bytes else it.installTotal,
             )
         }
+        DownloadForegroundService.finish(key(store, id))   // drop shade line; FGS self-stops when empty
     }
 
     /** Terminal failure. Kept in-memory for the session so the UI can offer retry/dismiss. */
@@ -104,6 +136,7 @@ object StoreDownloadHooks {
         DownloadRegistry.update(key(store, id)) {
             it.copy(state = DownloadState.FAILED, error = error)
         }
+        DownloadForegroundService.finish(key(store, id))
     }
 
     /**
@@ -115,6 +148,7 @@ object StoreDownloadHooks {
         val k = key(store, id)
         DownloadRegistry.update(k) { it.copy(state = DownloadState.CANCELLED) }
         DownloadRegistry.remove(k)
+        DownloadForegroundService.finish(k)
     }
 
     /**

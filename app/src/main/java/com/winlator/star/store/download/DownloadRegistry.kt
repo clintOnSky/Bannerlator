@@ -84,12 +84,23 @@ object DownloadRegistry {
 
     private lateinit var libPrefs: SharedPreferences
 
+    // Retained application Context so store-agnostic collaborators that have no Context of
+    // their own (e.g. StoreDownloadHooks, which is a stateless object) can start the shared
+    // download foreground service / post notifications. Always the *application* context —
+    // never an Activity — so it's leak-safe to hold for the process lifetime. Null until
+    // the first init(); callers treat a null as "not ready yet" and no-op.
+    @Volatile private var appCtx: Context? = null
+
+    /** Application Context captured at [init], or null before the first init. Leak-safe. */
+    fun appContext(): Context? = appCtx
+
     /**
      * Initialise the durable-library store and seed the registry with the previously
      * installed games. Call once early (e.g. from the app / a store main activity),
      * like [com.winlator.star.store.SteamPrefs.init]. Idempotent.
      */
     fun init(ctx: Context) {
+        appCtx = ctx.applicationContext   // publish first so it's set even on the early-return path
         if (::libPrefs.isInitialized) return
         libPrefs = ctx.applicationContext.getSharedPreferences(PREFS_LIBRARY, Context.MODE_PRIVATE)
         val loaded = loadLibrary().associateBy { it.key }
