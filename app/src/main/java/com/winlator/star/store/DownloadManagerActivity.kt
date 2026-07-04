@@ -90,6 +90,8 @@ class DownloadManagerActivity : ComponentActivity() {
     private var showExePicker by mutableStateOf<ExePickerDataDm?>(null)
     private var addToShortcuts by mutableStateOf<AddToShortcutsRequest?>(null)
     private var addResult by mutableStateOf<AddShortcutResult?>(null)
+    // Non-null while an uninstall is deleting files → shows the blocking progress spinner.
+    private var uninstallingName by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -123,6 +125,8 @@ class DownloadManagerActivity : ComponentActivity() {
                         },
                     )
                 }
+
+                uninstallingName?.let { UninstallProgressDialog(it) }
 
                 addToShortcuts?.let { req ->
                     ContainerPickerDialog(
@@ -218,16 +222,27 @@ class DownloadManagerActivity : ComponentActivity() {
         }
     }
 
-    /** Uninstall: mark uninstalled in the store DB, delete the install dir, drop the
-     *  durable-library row (which also removes it from the live registry). */
+    /** Uninstall: mark uninstalled in the store DB and delete the install dir off the UI
+     *  thread; once the delete is VERIFIED complete, drop the durable-library row (which also
+     *  removes it from the live registry), dismiss the spinner, and toast the real outcome. */
     private fun uninstall(entry: DownloadEntry) {
-        if (entry.store == Store.STEAM) {
-            entry.id.toIntOrNull()?.let { SteamRepository.getInstance().database.markUninstalled(it) }
+        uninstallingName = entry.name
+        StoreUninstaller.run(
+            installDir = entry.installPath,
+            mark = {
+                if (entry.store == Store.STEAM) {
+                    entry.id.toIntOrNull()?.let { SteamRepository.getInstance().database.markUninstalled(it) }
+                }
+            },
+        ) { ok ->
+            DownloadRegistry.removeLibraryEntry(entry.key)
+            uninstallingName = null
+            Toast.makeText(
+                this,
+                if (ok) "${entry.name} uninstalled" else "Couldn't fully remove ${entry.name}",
+                Toast.LENGTH_SHORT,
+            ).show()
         }
-        entry.installPath?.takeIf { it.isNotEmpty() }?.let { p ->
-            Thread { File(p).deleteRecursively() }.start()
-        }
-        DownloadRegistry.removeLibraryEntry(entry.key)
     }
 }
 
