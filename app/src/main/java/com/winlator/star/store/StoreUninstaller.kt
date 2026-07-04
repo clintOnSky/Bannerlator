@@ -2,7 +2,9 @@ package com.winlator.star.store
 
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,11 +13,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
 import java.io.File
 
 /**
@@ -47,6 +51,39 @@ object StoreUninstaller {
             }
             Handler(Looper.getMainLooper()).post { onResult(ok) }
         }.start()
+    }
+}
+
+/**
+ * Themed, auto-dismissing confirmation shown after an uninstall finishes.
+ *
+ * Replaces `Toast` — on this device's ROM (app targets SDK 28) system Toasts render as an
+ * empty black box, so we draw our own snackbar-style bar inside the app's Compose theme.
+ * Non-interactive (doesn't consume touches) and clears itself after ~2.2 s via [onTimeout].
+ */
+@Composable
+internal fun UninstallResultBar(message: String, onTimeout: () -> Unit) {
+    LaunchedEffect(message) {
+        delay(2200)
+        onTimeout()
+    }
+    Box(
+        modifier = Modifier.fillMaxSize().padding(bottom = 80.dp),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.inverseSurface,
+            contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+            tonalElevation = 6.dp,
+            shadowElevation = 6.dp,
+        ) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            )
+        }
     }
 }
 

@@ -92,6 +92,8 @@ class DownloadManagerActivity : ComponentActivity() {
     private var addResult by mutableStateOf<AddShortcutResult?>(null)
     // Non-null while an uninstall is deleting files → shows the blocking progress spinner.
     private var uninstallingName by mutableStateOf<String?>(null)
+    // Non-null briefly after an uninstall → themed auto-dismiss confirmation bar (not a Toast).
+    private var uninstallResult by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -127,6 +129,7 @@ class DownloadManagerActivity : ComponentActivity() {
                 }
 
                 uninstallingName?.let { UninstallProgressDialog(it) }
+                uninstallResult?.let { UninstallResultBar(it) { uninstallResult = null } }
 
                 addToShortcuts?.let { req ->
                     ContainerPickerDialog(
@@ -237,11 +240,7 @@ class DownloadManagerActivity : ComponentActivity() {
         ) { ok ->
             DownloadRegistry.removeLibraryEntry(entry.key)
             uninstallingName = null
-            Toast.makeText(
-                this,
-                if (ok) "${entry.name} uninstalled" else "Couldn't fully remove ${entry.name}",
-                Toast.LENGTH_SHORT,
-            ).show()
+            uninstallResult = if (ok) "${entry.name} uninstalled" else "Couldn't fully remove ${entry.name}"
         }
     }
 }

@@ -115,6 +115,8 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
     private var showSpeedPicker by mutableStateOf(false)
     // Non-null while an uninstall is deleting files → shows the blocking progress spinner.
     private var uninstallingName by mutableStateOf<String?>(null)
+    // Non-null briefly after an uninstall → themed auto-dismiss confirmation bar (not a Toast).
+    private var uninstallResult by mutableStateOf<String?>(null)
     private var showExePicker by mutableStateOf<ExePickerDataGame?>(null)
     private var addToShortcuts by mutableStateOf<AddToShortcutsRequest?>(null)
     private var addResult by mutableStateOf<AddShortcutResult?>(null)
@@ -250,6 +252,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                 }
 
                 uninstallingName?.let { UninstallProgressDialog(it) }
+                uninstallResult?.let { UninstallResultBar(it) { uninstallResult = null } }
             }
         }
 
@@ -492,11 +495,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                 mark = { SteamRepository.getInstance().database.markUninstalled(appId) },
             ) { ok ->
                 uninstallingName = null
-                Toast.makeText(
-                    this@SteamGameDetailActivity,
-                    if (ok) "${g.name} uninstalled" else "Couldn't fully remove ${g.name}",
-                    Toast.LENGTH_SHORT,
-                ).show()
+                uninstallResult = if (ok) "${g.name} uninstalled" else "Couldn't fully remove ${g.name}"
                 loadGame()
             }
         } else {

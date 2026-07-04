@@ -6,7 +6,6 @@ import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.LruCache
 import androidx.activity.ComponentActivity
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -95,6 +94,8 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
     private var steamStatus by mutableStateOf(SteamRepository.getInstance().status)
     // Non-null while an uninstall is deleting files → shows the blocking progress spinner.
     private var uninstallingName by mutableStateOf<String?>(null)
+    // Non-null briefly after an uninstall → themed auto-dismiss confirmation bar (not a Toast).
+    private var uninstallResult by mutableStateOf<String?>(null)
 
     private val imageCache = object : LruCache<Int, Bitmap>(4 * 1024 * 1024) {
         override fun sizeOf(key: Int, value: Bitmap) = value.byteCount
@@ -132,11 +133,7 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
                             mark = { SteamRepository.getInstance().database.markUninstalled(game.appId) },
                         ) { ok ->
                             uninstallingName = null
-                            Toast.makeText(
-                                this@SteamGamesActivity,
-                                if (ok) "${game.name} uninstalled" else "Couldn't fully remove ${game.name}",
-                                Toast.LENGTH_SHORT,
-                            ).show()
+                            uninstallResult = if (ok) "${game.name} uninstalled" else "Couldn't fully remove ${game.name}"
                             loadGames()
                         }
                     },
@@ -201,6 +198,7 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
                 }
 
                 uninstallingName?.let { UninstallProgressDialog(it) }
+                uninstallResult?.let { UninstallResultBar(it) { uninstallResult = null } }
             }
         }
 
