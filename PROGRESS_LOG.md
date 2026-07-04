@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-07-04 — ✅ Batch 1 committed, build started (CI 28692248319)
+
+> **Commit `6b91f13`** on `feat/steam-goldberg-patcher`. CI build-artifacts.yml run **`28692248319`** in_progress on HEAD `6b91f13` (~16 min). Native-steam agent implemented; diff reviewed — clean + compile-correct.
+> **What shipped:** (1) `SteamRepository.syncApps` → sequential batches of 25 (`requestNextAppBatch`/`finishAppSync`), PAUSE the app-sync while a download is active (`downloadActive`/`setDownloadActive`), resume on libraryWorker; queue confined to one thread; `LibraryProgress:2:processed:total`. (2) `SteamDepotDownloader`: `setDownloadActive(true/false)` around the CM work; false-complete guard — if `<90%` of PICS size on disk, refuse markInstalled, emit retryable failure (fixes 405 MB false-complete). (3) new `network_security_config.xml` cleartext-allow only steamcontent.com/steampipe.steamcontent.com + manifest ref. (4) `SteamGamesActivity` phase-2 progress label "Fetching app records (N/372)".
+> **Next (checkpoint 3 on build finish):** watch CI green → deliver APK → device-test — open app, tap Install (should no longer need a warm library; the sync pauses for the download), expect depot keys to land + full ~8.4 GB + no CLEARTEXT spam + correct Installed size. Then Batch 2 (single-session, reconnect-retry, wakelock/FGS).
+
+---
+
 ## 2026-07-04 — 🛠️ Building Batch 1 hardening (library-sync fix) — native-steam agent implementing, build pending
 
 > **State:** user approved building the fixes in 2 batches. A native-steam-engineer subagent is IMPLEMENTING **Batch 1** right now (not yet committed/built). Branch `feat/steam-goldberg-patcher`.
