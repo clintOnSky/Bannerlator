@@ -13,6 +13,12 @@
 
 ---
 
+## 2026-07-05 — 🎉 EPIC MERGED TO MAIN → Download Manager COMPLETE (all 4 stores)
+
+> **✅ `feat/epic-download-producer` MERGED TO MAIN** (user-instructed) — clean fast-forward `17f58ae..0ab3475`, main now `0ab3475`. Carries Epic Phase C (`4cf2b8f`) + the GOG/Epic list-card cold-start install-state fix (`0ab3475`). **Cross-store Download Manager is now COMPLETE across all 4 stores (Steam/Amazon/GOG/Epic).** NO release cut — stays vc37/2.2.2 (a future stable still needs a monotonic versionCode bump). Pre-merge, verified install-state on device against disk-truth (per-store prefs + `steam.db` is_installed + on-disk dirs): Epic=Brawlhalla, GOG=ELDERBORN, Steam=HL2+FlatOut, Amazon=0 — matched the DL-manager Library exactly. Branch kept. Open follow-ups: DepotSizeResolver true-size; release credits at next stable.
+
+---
+
 ## 2026-07-05 — 🐞→✅ Store-list cold-start install-state (GOG confirmed + Epic latent) FIXED
 
 > **Device report (user, 6 screenshots on Epic build `4cf2b8f`): Epic Phase C WORKING end-to-end** — Brawlhalla shows on the detail bar (10%), the DL-manager card *with cover art* (44%), AND the FGS shade notification (59%). Epic inherited the shared StoreDownloadHooks→FGS→notif→DL-manager plumbing correctly. **🐞 BUG spotted: GOG Library LIST shows "Install" on an already-installed game** (ELDERBORN) while the GOG *detail page* and the *cross-store DL-manager* both correctly show it Installed.
