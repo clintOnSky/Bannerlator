@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SettingsBackupRestore
 import java.io.File
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -67,13 +68,20 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material3.Surface
 import com.winlator.star.R
 import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.XrActivity
 import com.winlator.star.container.Container
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.core.FileUtils
+import com.winlator.star.core.GameSaveBackup
 import com.winlator.star.core.StringUtils
+import com.winlator.star.store.UninstallResultBar
 import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -115,6 +123,24 @@ fun ContainersScreen(
     var confirmDialog by remember { mutableStateOf<ConfirmAction?>(null) }
     var storageInfoContainer by remember { mutableStateOf<Container?>(null) }
     var showImportPicker by remember { mutableStateOf(false) }
+
+    // Backup / Restore game save flow (see SaveFlow). The engine posts its result on the main
+    // thread, so we just flip these bits of Compose state as the flow advances.
+    var saveFlow by remember { mutableStateOf<SaveFlow?>(null) }
+    var busyMessage by remember { mutableStateOf<String?>(null) }
+    var resultMessage by remember { mutableStateOf<String?>(null) }
+    var pendingRestoreContainer by remember { mutableStateOf<Container?>(null) }
+
+    // SAF picker for choosing a GameHub backup .zip to restore.
+    val restorePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        val target = pendingRestoreContainer
+        pendingRestoreContainer = null
+        if (uri != null && target != null) {
+            saveFlow = SaveFlow.Confirm(target, uri, GameSaveBackup.gameNameFromUri(context, uri))
+        }
+    }
 
     val topBarActions = LocalTopBarActions.current
     // LaunchedEffect — not SideEffect — so this runs in the same dispatcher queue as
@@ -167,6 +193,7 @@ fun ContainersScreen(
                             }
                         },
                         onInfo = { storageInfoContainer = container },
+                        onBackupRestore = { saveFlow = SaveFlow.Fork(container) },
                     )
                 }
             }
@@ -195,6 +222,13 @@ fun ContainersScreen(
             ) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             }
+        }
+
+        // Themed, auto-dismissing result bar for the backup/restore flow (avoids the
+        // black-box system Toast on this ROM). Lives inside this full-screen Box so it
+        // overlays the list at the bottom.
+        resultMessage?.let { msg ->
+            UninstallResultBar(message = msg, onTimeout = { resultMessage = null })
         }
         } // end inner Box(weight)
     } // end Column
@@ -274,6 +308,99 @@ fun ContainersScreen(
     storageInfoContainer?.let { container ->
         StorageInfoDialog(container = container, onDismiss = { storageInfoContainer = null })
     }
+
+    // ---- Backup / Restore game save flow ----
+    when (val flow = saveFlow) {
+        null -> {}
+        is SaveFlow.Fork -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text("Game saves") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text(flow.container.name, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.size(8.dp))
+                    TextButton(onClick = { saveFlow = SaveFlow.BackupFormat(flow.container) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Back up this save", modifier = Modifier.weight(1f))
+                    }
+                    TextButton(onClick = { saveFlow = SaveFlow.RestoreSource(flow.container) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Restore a save", modifier = Modifier.weight(1f))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { saveFlow = null }) { Text("Cancel") } },
+        )
+        is SaveFlow.RestoreSource -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text("Restore a save") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("Choose the backup source.", color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.size(8.dp))
+                    TextButton(
+                        onClick = {
+                            pendingRestoreContainer = flow.container
+                            saveFlow = null
+                            restorePickerLauncher.launch("application/zip")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("GameHub backup (.zip)", modifier = Modifier.weight(1f)) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { saveFlow = SaveFlow.Fork(flow.container) }) { Text("Back") } },
+        )
+        is SaveFlow.Confirm -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text("Restore game save?") },
+            text = {
+                Text(
+                    "Restore the GameHub backup of \"${flow.gameName}\" into container " +
+                        "\"${flow.container.name}\"?\n\nThis may overwrite existing save data."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val c = flow.container
+                    val uri = flow.uri
+                    val name = flow.gameName
+                    saveFlow = null
+                    busyMessage = "Restoring $name…"
+                    GameSaveBackup.restore(context, uri, c) { r ->
+                        busyMessage = null
+                        resultMessage = if (r.ok) "Restored ${r.filesWritten} files to \"${c.name}\""
+                        else "Restore failed: ${r.error ?: "unknown error"}"
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { saveFlow = null }) { Text("Cancel") } },
+        )
+        is SaveFlow.BackupFormat -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text("Back up this save") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("Choose a backup format.", color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.size(8.dp))
+                    TextButton(
+                        onClick = {
+                            val c = flow.container
+                            saveFlow = null
+                            busyMessage = "Backing up ${c.name}…"
+                            GameSaveBackup.backup(context, c) { r ->
+                                busyMessage = null
+                                resultMessage = if (r.ok)
+                                    "Saved ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
+                                else "Backup failed: ${r.error ?: "unknown error"}"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("GameHub-compatible .zip", modifier = Modifier.weight(1f)) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { saveFlow = SaveFlow.Fork(flow.container) }) { Text("Back") } },
+        )
+    }
+
+    busyMessage?.let { SaveFlowProgressDialog(message = it) }
 }
 
 @Composable
@@ -285,6 +412,7 @@ private fun ContainerItem(
     onRemove: () -> Unit,
     onExport: () -> Unit,
     onInfo: () -> Unit,
+    onBackupRestore: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -419,6 +547,11 @@ private fun ContainerItem(
                         onClick = { menuExpanded = false; onExport() },
                     )
                     DropdownMenuItem(
+                        text = { Text("Backup / Restore save") },
+                        leadingIcon = { Icon(Icons.Filled.SettingsBackupRestore, null) },
+                        onClick = { menuExpanded = false; onBackupRestore() },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Info") },
                         leadingIcon = { Icon(Icons.Filled.Info, null) },
                         onClick = { menuExpanded = false; onInfo() },
@@ -432,6 +565,39 @@ private fun ContainerItem(
 private sealed class ConfirmAction {
     data class Duplicate(val container: Container) : ConfirmAction()
     data class Remove(val container: Container) : ConfirmAction()
+}
+
+/** Steps of the Backup / Restore game-save flow launched from a container's overflow menu. */
+private sealed class SaveFlow {
+    /** Direction picker: back up vs restore. */
+    data class Fork(val container: Container) : SaveFlow()
+    /** Restore → choose a backup source (GameHub backup today; more later). */
+    data class RestoreSource(val container: Container) : SaveFlow()
+    /** Restore → a .zip has been picked; confirm before overwriting. */
+    data class Confirm(val container: Container, val uri: android.net.Uri, val gameName: String) : SaveFlow()
+    /** Back up → choose an output format (GameHub-compatible .zip today; more later). */
+    data class BackupFormat(val container: Container) : SaveFlow()
+}
+
+/** Blocking, non-dismissable spinner shown while a backup/restore runs off the UI thread. */
+@Composable
+private fun SaveFlowProgressDialog(message: String) {
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+    ) {
+        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+            Row(modifier = Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 20.dp),
+                )
+            }
+        }
+    }
 }
 
 @Composable
