@@ -16,7 +16,7 @@
 ## 2026-07-04 — 🔧 Live percentage on GOG/Amazon detail pages during download
 
 > Device-test of `2ab915c`: GOG all-works + uninstall→re-download→install works, BUT the detail page showed the bar+Cancel with **no percentage text** (DL manager + notification show "Downloading… 57%"). The detail-sync collector set the bar but never `progressLabel`. **Fix `c1be52b` (build `28728512650` running):** GOG+Amazon `observeRegistry()` collector now drives a live `progressLabel="Downloading… ${pct}%"` (Amazon adds "(done/total)" when it has bytes) + visible; GOG local onProgress label switched from engine-msg to "$pct%" (no flicker).
-> **NEXT:** build green → deliver GOG live-% APK. **✅ Epic Phase C BEGUN in parallel:** spec rescoped (live-% items 9-10), new branch `feat/epic-download-producer` off GOG-branch `17f58ae` (off GOG not main, to inherit its DownloadManagerActivity changes), Epic agent dispatched. Epic = last store (Amazon-shaped, weak cancel, launch already fixed). Merge Epic branch (=GOG+Epic) → main when both device-proven.
+> **✅ live-% build `28728512650` GREEN 6m55s (warm) → APK DELIVERED** `/sdcard/Download/bannerlator-gog-livepct-c1be52b-standard.apk` (sha `22bc87cd…530f9cf3`, bit-identical, on-device); ⏳ user device-testing live-%. **✅ Epic Phase C BEGUN in parallel:** spec rescoped (live-% items 9-10), new branch `feat/epic-download-producer` off GOG-branch `17f58ae` (off GOG not main, to inherit its DownloadManagerActivity changes), Epic agent dispatched. Epic = last store (Amazon-shaped, weak cancel, launch already fixed). Merge Epic branch (=GOG+Epic) → main when both device-proven.
 
 ---
 
