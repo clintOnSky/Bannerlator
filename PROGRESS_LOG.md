@@ -13,6 +13,18 @@
 
 ---
 
+## 2026-07-04 — 🐞×4 Amazon launch/completion/routing/dialog (device-test of cceba57)
+
+> **`cceba57` device-tested. ✅ WINS:** cover art on DL card, detail progress label "68% (2.7 GB / 3.9 GB)", **shade notification works** ("Downloading — Dread Templar — 82% (3.2 GB / 3.9 GB)"). **4 NEW bugs (crash captured via `getlog.py exec logcat -b crash`):**
+> 1. **DL-manager cards don't open the store detail page** — `DownloadManagerActivity.openDetail(:186)` routes only STEAM, else no-op. Fix: route AMAZON → `AmazonGameDetailActivity`, hydrate extras (entitlement_id/dev/pub/product_sku) from `amazon_library_cache` by productId; GOG/Epic TODO.
+> 2. **Launch from Amazon DETAIL page CRASHES** — `ActivityNotFoundException` at `pendingLaunchExe:480` (hardcodes stale `com.xj.landscape.launcher.ui.main.LandscapeLauncherMainActivity`, absent in `com.winlator.banner`). Fix: delete it, use `StarLaunchBridge.addToLauncher(this,title,exe,artUrl)` (the working list path).
+> 3. **Container-picker dialog unthemed** ("old menu style" white) — `StarLaunchBridge.java:129` uses default-light `AlertDialog.Builder`. Fix: dark+pink themed dialog (shared infra → fixes all stores).
+> 4. **Download hangs at 100% + auto-exe-picker on completion** — `AmazonGameDetailActivity:330-350` shows the exe picker on completion when >1 exe, gating `markInstalled`; if user isn't on the detail page the dialog queues on the stopped Activity → card stuck at 100%. Fix: completion auto-records best-scored exe + markInstalled (NO dialog, both entry points); move exe picker to the **Launch** flow (before the container picker).
+>
+> All 4 = one coherent Amazon completion→launch flow fix + DL routing + dialog theme. **Dispatched to native-steam-engineer (bg); NEXT: report → review → commit → CI → deliver → device-test all 4.**
+
+---
+
 ## 2026-07-04 — 🐞→✅ Install-state = one source of truth (uninstall left Amazon list "Installed")
 
 > **Device-test of `3ad879a` surfaced a bug:** user uninstalled Amazon "Dread Templar" from the DL manager. **Files WERE deleted** (device-verified: `/data/data/com.winlator.banner/files/Amazon/` empty), but the Amazon store list still showed "✓ Installed". **Cause:** cross-store uninstall cleared the registry row + Steam DB but never Amazon's native record; the Amazon list reads install-state solely from pref `amazon_exe_<id>` (`AmazonGamesActivity.kt:1014,1245`), which survived. Latent 2nd bug: `AmazonLibrarySync.seed()` treated `exe!=null` as installed → would resurrect a zombie INSTALLED row on next cold start.
