@@ -110,6 +110,7 @@ class DownloadManagerActivity : ComponentActivity() {
         // Amazon store first) still self-heals orphaned installs and surfaces update-available.
         // Idempotent; never throws into startup.
         AmazonLibrarySync.seed(this)
+        GogLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -207,9 +208,27 @@ class DownloadManagerActivity : ComponentActivity() {
                     },
                 )
             }
-            // TODO(GOG/EPIC): route to GogGameDetailActivity / EpicGameDetailActivity (they exist)
-            // once those producers populate the registry — same hydrate-from-cache shape as Amazon.
-            Store.GOG, Store.EPIC -> { /* detail routing lands with those producers */ }
+            Store.GOG -> {
+                // Hydrate the detail extras from gog_library_cache; fall back to the entry's own
+                // fields so the page still opens even if the cache is unavailable.
+                val d = GogLibrarySync.cachedDetail(this, entry.id)
+                val title = d?.title?.takeIf { it.isNotEmpty() } ?: entry.name
+                val image = d?.imageUrl?.takeIf { it.isNotEmpty() } ?: entry.cover ?: ""
+                startActivity(
+                    Intent(this, GogGameDetailActivity::class.java).apply {
+                        putExtra("game_id", entry.id)
+                        putExtra("title", title)
+                        putExtra("image_url", image)
+                        putExtra("description", d?.description ?: "")
+                        putExtra("developer", d?.developer ?: "")
+                        putExtra("category", d?.category ?: "")
+                        putExtra("generation", d?.generation ?: 0)
+                    },
+                )
+            }
+            // TODO(EPIC): route to EpicGameDetailActivity once its producer populates the registry —
+            // same hydrate-from-cache shape as Amazon/GOG.
+            Store.EPIC -> { /* detail routing lands with the Epic producer */ }
         }
     }
 
@@ -286,9 +305,10 @@ class DownloadManagerActivity : ComponentActivity() {
     private fun purgeNativeInstall(entry: DownloadEntry) {
         when (entry.store) {
             Store.AMAZON -> AmazonInstallState.purge(this, entry.id)
-            // TODO(GOG/EPIC): clear their native install records here when those producers land,
-            // mirroring AmazonInstallState.purge (same shape: remove the store's per-game keys).
-            Store.GOG, Store.EPIC -> Unit
+            Store.GOG -> GogInstallState.purge(this, entry.id)
+            // TODO(EPIC): clear its native install record here when the Epic producer lands,
+            // mirroring Amazon/GOG (same shape: remove the store's per-game keys).
+            Store.EPIC -> Unit
             Store.STEAM -> Unit   // handled via SteamRepository.markUninstalled in `mark`
         }
     }

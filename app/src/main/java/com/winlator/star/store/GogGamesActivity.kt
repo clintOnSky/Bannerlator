@@ -60,7 +60,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.ui.theme.WinlatorTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -154,6 +157,11 @@ class GogGamesActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("bh_gog_prefs", 0)
         viewMode = prefs.getString(VIEW_MODE_KEY, "grid") ?: "grid"
+
+        // Cross-store Download Manager (Phase B): init the registry + seed/self-heal the installed
+        // GOG library here (idempotent), mirroring AmazonGamesActivity.
+        DownloadRegistry.init(this)
+        GogLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -540,8 +548,24 @@ class GogGamesActivity : ComponentActivity() {
         )
         downloadStates[game.gameId] = dlState
 
-        val cancelRunnable = GogDownloadManager.startDownload(this, game, object : GogDownloadManager.Callback {
+        // Publish into the cross-store Download Manager (shade notification + background survival).
+        // Single honest bar (pct only). Cancel routes to the Runnable stored in downloadStates
+        // (read lazily so it resolves once startDownload has returned it below).
+        StoreDownloadHooks.registerDownload(
+            store = Store.GOG,
+            id = game.gameId,
+            name = game.title,
+            cover = normalizeGogCover(game.imageUrl),
+            supportsPause = false,
+            installTotal = prefs.getLong("gog_size_${game.gameId}", 0L),
+            cancel = { downloadStates[game.gameId]?.cancelRunnable?.run() },
+        )
+
+        // applicationContext: the GOG engine keeps the Context for its whole background run; the
+        // list Activity must not be pinned/leaked. Registry hooks run on the engine callback thread.
+        val cancelRunnable = GogDownloadManager.startDownload(applicationContext, game, object : GogDownloadManager.Callback {
             override fun onProgress(msg: String, pct: Int) {
+                StoreDownloadHooks.tick(Store.GOG, game.gameId, pct)
                 runOnUiThread {
                     val existing = downloadStates[game.gameId] ?: return@runOnUiThread
                     downloadStates[game.gameId] = existing.copy(
@@ -551,6 +575,20 @@ class GogGamesActivity : ComponentActivity() {
                 }
             }
             override fun onComplete(exePath: String) {
+                // Finalize into the registry (engine already wrote gog_exe_/gog_dir_).
+                val exe = prefs.getString("gog_exe_${game.gameId}", null)
+                val dir = prefs.getString("gog_dir_${game.gameId}", null)
+                if (exe != null && dir != null) {
+                    val installAbs = GogInstallPath.getInstallDir(applicationContext, dir).absolutePath
+                    StoreDownloadHooks.markInstalled(
+                        store = Store.GOG,
+                        id = game.gameId,
+                        installPath = installAbs,
+                        bytes = prefs.getLong("gog_size_${game.gameId}", 0L),
+                    )
+                } else {
+                    StoreDownloadHooks.markFailed(Store.GOG, game.gameId, "No executable found")
+                }
                 runOnUiThread {
                     downloadStates[game.gameId] = GameDownloadState(
                         progress = 100,
@@ -564,6 +602,7 @@ class GogGamesActivity : ComponentActivity() {
                 }
             }
             override fun onError(msg: String) {
+                StoreDownloadHooks.markFailed(Store.GOG, game.gameId, msg)
                 runOnUiThread {
                     downloadStates.remove(game.gameId)
                     applyFilter(searchQuery)
@@ -571,22 +610,27 @@ class GogGamesActivity : ComponentActivity() {
                 }
             }
             override fun onCancelled() {
+                StoreDownloadHooks.markCancelled(Store.GOG, game.gameId)
                 runOnUiThread {
                     downloadStates.remove(game.gameId)
                     applyFilter(searchQuery)
                 }
             }
             override fun onSelectExe(candidates: MutableList<String>?, onSelected: Consumer<String>?) {
-                runOnUiThread {
-                    if (candidates != null && onSelected != null) {
-                        showExePicker = ExePickerDataGog(candidates) { onSelected.accept(it) }
-                    }
-                }
+                // No completion dialog (would wedge the DL card at 100% off-screen): auto-pick the
+                // best (first) candidate. Exe choice stays available via the detail "Set .exe…".
+                if (onSelected != null) onSelected.accept(candidates?.firstOrNull() ?: "")
             }
         })
 
         val existing = downloadStates[game.gameId] ?: return
         downloadStates[game.gameId] = existing.copy(cancelRunnable = cancelRunnable)
+    }
+
+    /** `//host/img` → `https://host/img`; blank → null. Matches the detail page's normalization. */
+    private fun normalizeGogCover(url: String?): String? {
+        if (url.isNullOrEmpty()) return null
+        return if (url.startsWith("//")) "https:$url" else url
     }
 
     // ── Install confirmation dialog ──────────────────────────────────────────
@@ -661,11 +705,10 @@ class GogGamesActivity : ComponentActivity() {
                     lifecycleScope.launch(Dispatchers.IO) {
                         val installPath = GogInstallPath.getInstallDir(this@GogGamesActivity, dirName)
                         deleteDir(installPath)
-                        prefs.edit()
-                            .remove("gog_dir_${game.gameId}")
-                            .remove("gog_exe_${game.gameId}")
-                            .remove("gog_cover_${game.gameId}")
-                            .apply()
+                        // Purge the FULL native install record + clear the DL manager's row, so the
+                        // detail page and the cross-store Download Manager stay in sync. Mirrors Amazon.
+                        GogInstallState.purge(applicationContext, game.gameId)
+                        StoreDownloadHooks.markUninstalled(Store.GOG, game.gameId)
                         withContext(Dispatchers.Main) {
                             applyFilter(searchQuery)
                             resultBarMsg = "${game.title} uninstalled"
