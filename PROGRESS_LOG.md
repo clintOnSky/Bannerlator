@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-07-04 — ✅ MERGED Amazon Phase A → main + cached both CI workflows + branched for GOG
+
+> **Toast sweep DEVICE-PROVEN** (user "toast sweep good") → all of Amazon Phase A + shared infra is device-proven. **Merged `feat/download-manager-stores` → `main`** (merge `88e2360` + cleanup `180c2c8` removing the redundant `build-artifacts-fast.yml`). **No release cut** (stays vc37/2.2.2). Merged content: Amazon DownloadRegistry producer, non-Steam store restyle, ⬇ button, notification + background-download foreground service, install-state one-source-of-truth (uninstall purge + self-heal), launch/detail-routing/dialog fixes + Epic launch-crash fix, full black-box Toast sweep.
+> **CI caching adopted:** folded into `build-artifacts.yml` (`6ffc374`) AND `release.yml` (Nightly Manual Release Build, `55f9caa`) — setup-java (drop apt JDK), setup-gradle dep+build cache, NDK+cmake cache, JavaSteam-JAR cache (keyed on upstream commit), LSFG `.so` cache. Validated ~28% faster warm (16min → 11m41s), green, all 3 valid APKs. First run on a new scope is cold, warm after.
+> **➡️ New branch `feat/gog-download-producer`** off main `180c2c8` for **Phase B (GOG)** — spec ready at `/home/claude-user/scratchpad/gog_phase_b_spec.md`.
+
+---
+
 ## 2026-07-04 — ⚙️ CI build-speed: cloned cached workflow under test (build-artifacts-fast.yml)
 
 > User asked about speeding up the ~13-16 min CI build (zero caching today). Decided: **ALWAYS build all 3 flavors** (no standard-only), so speedups = caching + drop redundant JDK only. Built a PARALLEL cloned workflow to validate WITHOUT touching the primary `build-artifacts.yml`.
