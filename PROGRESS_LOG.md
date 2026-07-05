@@ -26,7 +26,7 @@
 > - `DownloadEntry.updateAvailable` (transient, not persisted) — amber card marker matching the store list's language; sourced from cached `versionId` `_UPDATE_AVAILABLE` suffix at seed; `markInstalled` clears it; Steam=false.
 > - cover parity: seed cover = `artUrl.ifEmpty{heroUrl}` (matches list). Installed cards show no size line (Steam parity — flagged, can add if wanted).
 >
-> Compile-verified (`Store` imported, `isActive`/`get` exist, same-package helper). **STATUS:** CI `28723445905` in final artifact-upload stage; bg watcher `b34k8pqpk` active → on GREEN auto-deliver standard APK to `/sdcard/Download/bannerlator-state-sync-cceba57-standard.apk` (verify sha256+size vs CI). **DEVICE-TEST:** uninstall from Manager → Amazon list flips to NOT installed; cold restart → no zombie; update-available shows on card; cover/title match detail.
+> Compile-verified (`Store` imported, `isActive`/`get` exist, same-package helper). **CI `28723445905` GREEN (conclusion re-verified) → STANDARD APK DELIVERED** `/sdcard/Download/bannerlator-state-sync-cceba57-standard.apk` (589,560,894 B, sha256 `ff7b29e910452a4a…42efd0ab`, bit-identical to CI, on-device confirmed). **⏳ USER DEVICE-TESTING.** DEVICE-TEST: uninstall from Manager → Amazon list flips to NOT installed; force-close+reopen → uninstalled game stays gone AND current orphaned Dread Templar auto-heals; update-available amber marker on card; cover/title match detail.
 
 ---
 
