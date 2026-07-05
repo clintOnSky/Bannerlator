@@ -12,6 +12,7 @@ import android.view.View
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1524,6 +1525,17 @@ internal fun GraphicsDriverConfigDialog(
     var disablePresentWait by remember { mutableStateOf(cfg["disablePresentWait"] == "1") }
     var fdDevFeatures    by remember { mutableStateOf(cfg["fdDevFeatures"] == "1") }
 
+    // --- BCn Layer (leegao bcn_layer) settings; only meaningful when driver == wrapper-bcn_layer ---
+    val isBcnLayer = graphicsDriver == "wrapper-bcn_layer"
+    var bcnSectionExpanded by remember { mutableStateOf(false) }
+    // Force decode on all GPUs -> BCN_COMPUTE_AUTO=0. Default ON (the Mali force-decode fix).
+    var bcnLayerAuto      by remember { mutableStateOf(cfg["bcnLayerAuto"]?.let { it == "1" } ?: true) }
+    var bcnTranscodeEtc2  by remember { mutableStateOf(cfg["bcnTranscodeEtc2"] == "1") }
+    var bcnTranscodeAstc  by remember { mutableStateOf(cfg["bcnTranscodeAstc"] == "1") }
+    // Storage image path -> BCN_COMPUTE_IMAGE_VIEW=1. Default ON.
+    var bcnImageView      by remember { mutableStateOf(cfg["bcnImageView"]?.let { it == "1" } ?: true) }
+    var bcnDebugLog       by remember { mutableStateOf(cfg["bcnDebugLog"] == "1") }
+
     val deviceMemoryEntries = remember { context.resources.getStringArray(R.array.device_memory_entries).toList() }
     var selectedMemoryEntry by remember {
         val storedNum = cfg["maxDeviceMemory"] ?: "0"
@@ -1594,6 +1606,13 @@ internal fun GraphicsDriverConfigDialog(
     val bcnEmulationEntries = remember { context.resources.getStringArray(R.array.bcn_emulation_entries).toList() }
     val bcnTypeEntries      = remember { context.resources.getStringArray(R.array.bcn_emulation_type_entries).toList() }
     val bcnCacheEntries     = remember { context.resources.getStringArray(R.array.bcn_emulation_cache_entries).toList() }
+    val bcnMaxTexEntries    = remember { context.resources.getStringArray(R.array.bcn_max_texture_size_entries).toList() }
+    // Config key bcnMaxTextureSize stores the numeric env value ("0"/"1024"/...); "0" == Uncapped.
+    var bcnMaxTexEntry by remember {
+        val stored = cfg["bcnMaxTextureSize"] ?: "0"
+        mutableStateOf(if (stored == "0" || stored.isEmpty()) bcnMaxTexEntries.first()
+                       else bcnMaxTexEntries.firstOrNull { it == stored } ?: bcnMaxTexEntries.first())
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1652,6 +1671,77 @@ internal fun GraphicsDriverConfigDialog(
                     Checkbox(checked = fdDevFeatures, onCheckedChange = { fdDevFeatures = it })
                     Text("OneUI / HyperOS Fix")
                 }
+
+                // BCn Layer Settings — only when the Wrapper + bcn_layer driver is selected.
+                if (isBcnLayer) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { bcnSectionExpanded = !bcnSectionExpanded }
+                    ) {
+                        Text(
+                            (if (bcnSectionExpanded) "▾  " else "▸  ") + stringResource(R.string.bcn_layer_section),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (bcnSectionExpanded) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.bcn_layer_section_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnLayerAuto, onCheckedChange = { bcnLayerAuto = it })
+                            Text(stringResource(R.string.bcn_layer_force_decode))
+                        }
+                        Text(
+                            stringResource(R.string.bcn_layer_force_decode_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnTranscodeEtc2, onCheckedChange = { bcnTranscodeEtc2 = it })
+                            Text(stringResource(R.string.bcn_layer_transcode_etc2))
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnTranscodeAstc, onCheckedChange = { bcnTranscodeAstc = it })
+                            Text(stringResource(R.string.bcn_layer_transcode_astc))
+                        }
+                        Text(
+                            stringResource(R.string.bcn_layer_transcode_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnImageView, onCheckedChange = { bcnImageView = it })
+                            Text(stringResource(R.string.bcn_layer_image_view))
+                        }
+                        Text(
+                            stringResource(R.string.bcn_layer_image_view_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        LabeledDropdown(stringResource(R.string.bcn_layer_max_texture_size), bcnMaxTexEntries, bcnMaxTexEntry, { bcnMaxTexEntry = it })
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnDebugLog, onCheckedChange = { bcnDebugLog = it })
+                            Text(stringResource(R.string.bcn_layer_debug_log))
+                        }
+                        Text(
+                            stringResource(R.string.bcn_layer_debug_log_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1667,6 +1757,12 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnEmulation=$bcnEmulation;" +
                     "bcnEmulationType=$bcnEmulationType;" +
                     "bcnEmulationCache=$bcnEmulationCache;" +
+                    "bcnLayerAuto=${if (bcnLayerAuto) "1" else "0"};" +
+                    "bcnTranscodeEtc2=${if (bcnTranscodeEtc2) "1" else "0"};" +
+                    "bcnTranscodeAstc=${if (bcnTranscodeAstc) "1" else "0"};" +
+                    "bcnImageView=${if (bcnImageView) "1" else "0"};" +
+                    "bcnMaxTextureSize=${if (bcnMaxTexEntry == "Uncapped") "0" else bcnMaxTexEntry};" +
+                    "bcnDebugLog=${if (bcnDebugLog) "1" else "0"};" +
                     "gpuName=$gpuName" +
                     ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"
                 onConfirm(config)
