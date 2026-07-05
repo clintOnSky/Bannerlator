@@ -13,6 +13,13 @@
 
 ---
 
+## 2026-07-04 — Goldberg risk warning + warm build confirmed
+
+> Added a user-facing caveat to the Steam Emulator (Goldberg) section (`2ab915c`, error-color Text under the subtitle): "Please note: this is not a fix for all Steam games that require a Steam client to run. It is not a guaranteed fix-all — use at your own risk!"
+> Detail-sync build `28727937666` (72dbed1) GREEN **8m14s** — first fully-warm build off main's populated caches (~16min→8m14s, ~48% faster; confirms the caching). Combined build `28728128024` (detail-sync + warning, sha 2ab915c) running → deliver `bannerlator-gog-warn-2ab915c`.
+
+---
+
 ## 2026-07-04 — 🐞 GOG (+Amazon) detail page not synced with download-manager progress
 
 > GOG device-test: card + notification work, but the **GOG detail page shows "Install" during a live download** (ELDERBORN: card 55%+Cancel, notif 58%, detail = Install). Cause: `GogGameDetailActivity.refreshActionState()` (and `AmazonGameDetailActivity.refreshActionState()` — same latent bug on main) read install PREFS only, never the DownloadRegistry → opening the detail mid-download (or list-started) shows Install, not progress+Cancel. +card showed "0 KB / 0 KB" (GOG pct-only).
