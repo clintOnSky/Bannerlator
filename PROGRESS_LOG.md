@@ -13,6 +13,13 @@
 
 ---
 
+## 2026-07-04 — 🔧 Live percentage on GOG/Amazon detail pages during download
+
+> Device-test of `2ab915c`: GOG all-works + uninstall→re-download→install works, BUT the detail page showed the bar+Cancel with **no percentage text** (DL manager + notification show "Downloading… 57%"). The detail-sync collector set the bar but never `progressLabel`. **Fix `c1be52b` (build `28728512650` running):** GOG+Amazon `observeRegistry()` collector now drives a live `progressLabel="Downloading… ${pct}%"` (Amazon adds "(done/total)" when it has bytes) + visible; GOG local onProgress label switched from engine-msg to "$pct%" (no flicker).
+> **NEXT:** build green → deliver → THEN rescope Epic Phase C + BEGIN (per user directive).
+
+---
+
 ## 2026-07-04 — Goldberg risk warning + warm build confirmed
 
 > Added a user-facing caveat to the Steam Emulator (Goldberg) section (`2ab915c`, error-color Text under the subtitle): "Please note: this is not a fix for all Steam games that require a Steam client to run. It is not a guaranteed fix-all — use at your own risk!"
