@@ -75,7 +75,10 @@ public final class GogTokenRefresh {
             Log.d(TAG, "Token refreshed OK");
             return newAccessToken;
         } catch (Exception e) {
-            Log.e(TAG, "Token refresh failed", e);
+            // Do NOT pass the throwable — the token endpoint URL embeds client_secret +
+            // refresh_token, and Android HttpURLConnection IOExceptions echo the URL in
+            // their message/stack. Log the exception class only.
+            Log.e(TAG, "Token refresh failed: " + e.getClass().getSimpleName());
             return null;
         }
     }

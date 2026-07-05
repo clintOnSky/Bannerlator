@@ -64,7 +64,7 @@ class AmazonLoginActivity : ComponentActivity() {
 
         val code = extractAuthCode(url)
         if (code == null) {
-            Log.e(TAG, "Amazon redirect missing auth code: $url")
+            Log.e(TAG, "Amazon redirect missing auth code")
             codeCaptured.set(false)
             return
         }

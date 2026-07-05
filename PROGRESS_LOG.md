@@ -13,6 +13,15 @@
 
 ---
 
+## 2026-07-05 — 🔒 Store logcat credential-leak audit + redaction fix (IN FLIGHT)
+
+> **Branch `fix/store-log-redaction`** (off main `a0ef2ee`). User asked whether any of the 4 stores emit credentials/tokens/username/email to logcat. 4-agent parallel audit (read-only) → then a REDACTION-ONLY fix (log-string edits, ZERO behavior change: login/downloads/token-refresh/cloud-save untouched; only what's WRITTEN to the log changes).
+> **Audit verdict:** across all stores, passwords/emails/usernames/access+refresh tokens are NEVER directly logged (WebView/OAuth logins; tokens in Authorization headers). No HTTP logging interceptor anywhere. **Steam = CLEAN** (`SteamLogRedactor` wired into logcat sinks + secrets registered pre-log + JavaSteam firehose gated behind off-by-default debug toggle; only 5 raw-Throwable logs bypass it = LOW hardening, kept per user). **Leaks (Amazon/Epic/GOG, no redactor/gating):** signed CDN/manifest URLs (auth in query) — Amazon `AmazonDownloadManager.java:112` unconditional every install, + error paths across Amazon/Epic/GOG; OAuth code via whole-page dump (`EpicLoginActivity.kt:71` HIGH, `AmazonLoginActivity.kt:67`); **GOG `GogTokenRefresh.java:78` can print `client_secret`+`refresh_token`** via the error URL (highest-value payload); identity ids (EpicAccountId, GOG userId); Amazon `credentials.json` echo via JSONException.
+> **Fix:** new `StoreLog.redactUrl()` (strips query/userinfo → scheme+host+path); exception logs → class-name-only; page/redirect dumps → static strings; drop accountId/userId/body snippets; Steam Throwables → `SteamLogRedactor`. Impl by native-steam-engineer agent.
+> **NEXT:** review diff (redaction-only) → commit (The412Banner) → push → CI `build-artifacts.yml` on the branch → verify green+sha → stage ONE combined standard APK to `/sdcard/Download/` (user HOLDING all staging until this build is ready) → device-diff logcat before/after → merge decision. No release cut (vc37/2.2.2). Main build `28746137017` GREEN + untouched.
+
+---
+
 ## 2026-07-05 — 🎉 EPIC MERGED TO MAIN → Download Manager COMPLETE (all 4 stores)
 
 > **✅ `feat/epic-download-producer` MERGED TO MAIN** (user-instructed) — clean fast-forward `17f58ae..0ab3475`, main now `0ab3475`. Carries Epic Phase C (`4cf2b8f`) + the GOG/Epic list-card cold-start install-state fix (`0ab3475`). **Cross-store Download Manager is now COMPLETE across all 4 stores (Steam/Amazon/GOG/Epic).** NO release cut — stays vc37/2.2.2 (a future stable still needs a monotonic versionCode bump). Pre-merge, verified install-state on device against disk-truth (per-store prefs + `steam.db` is_installed + on-disk dirs): Epic=Brawlhalla, GOG=ELDERBORN, Steam=HL2+FlatOut, Amazon=0 — matched the DL-manager Library exactly. Branch kept. Open follow-ups: DepotSizeResolver true-size; release credits at next stable.

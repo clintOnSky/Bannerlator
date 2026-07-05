@@ -273,12 +273,12 @@ public class EpicApiClient {
             conn.disconnect();
 
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "Epic GET HTTP " + code + " from " + urlStr + ": " + sb);
+                Log.e(TAG, "Epic GET HTTP " + code + " from " + StoreLog.redactUrl(urlStr) + " (error body suppressed)");
                 return null;
             }
             return sb.toString();
         } catch (Exception e) {
-            Log.e(TAG, "Epic getWithLegendaryUA failed: " + urlStr, e);
+            Log.e(TAG, "Epic getWithLegendaryUA failed: " + StoreLog.redactUrl(urlStr) + " (" + e.getClass().getSimpleName() + ")");
             return null;
         }
     }

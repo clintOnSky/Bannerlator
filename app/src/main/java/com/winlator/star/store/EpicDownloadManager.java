@@ -398,7 +398,7 @@ public class EpicDownloadManager {
                 result.add(new CdnUrl(baseUrl, cloudDir, authParams));
             }
         } catch (Exception e) {
-            Log.e(TAG, "parseCdnUrls error: " + e.getMessage());
+            Log.e(TAG, "parseCdnUrls error: " + e.getClass().getSimpleName());
         }
         return result;
     }
@@ -486,7 +486,7 @@ public class EpicDownloadManager {
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "downloadManifest error: " + e.getMessage());
+            Log.e(TAG, "downloadManifest error: " + e.getClass().getSimpleName());
         }
         return null;
     }
@@ -792,7 +792,7 @@ public class EpicDownloadManager {
             return data;
 
         } catch (Exception e) {
-            Log.e(TAG, "decompressChunk error: " + e.getMessage());
+            Log.e(TAG, "decompressChunk error: " + e.getClass().getSimpleName());
             return null;
         }
     }
@@ -811,7 +811,7 @@ public class EpicDownloadManager {
                 conn.setRequestProperty("Authorization", bearerToken);
             int code = conn.getResponseCode();
             if (code != 200) {
-                Log.w(TAG, "HTTP " + code + " for " + urlStr);
+                Log.w(TAG, "HTTP " + code + " for " + StoreLog.redactUrl(urlStr));
                 return null;
             }
             int contentLength = conn.getContentLength();
@@ -825,7 +825,7 @@ public class EpicDownloadManager {
             in.close();
             return out.toByteArray();
         } catch (Exception e) {
-            Log.w(TAG, "downloadBytes error [" + urlStr + "]: " + e.getMessage());
+            Log.w(TAG, "downloadBytes error [" + StoreLog.redactUrl(urlStr) + "]: " + e.getClass().getSimpleName());
             return null;
         } finally {
             if (conn != null) conn.disconnect();
@@ -980,7 +980,7 @@ public class EpicDownloadManager {
                 total += Math.max(chunk.windowSize, 0);
             return total > 0 ? total : -1;
         } catch (Exception e) {
-            Log.w(TAG, "fetchInstallSizeBytes Epic: " + e.getMessage());
+            Log.w(TAG, "fetchInstallSizeBytes Epic: " + e.getClass().getSimpleName());
             return -1;
         }
     }

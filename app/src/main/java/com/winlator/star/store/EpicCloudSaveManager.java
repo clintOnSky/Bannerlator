@@ -54,7 +54,7 @@ public final class EpicCloudSaveManager {
                 EpicCredentialStore.Credentials creds = EpicCredentialStore.load(ctx);
                 String accountId = creds != null ? creds.accountId : null;
                 if (accountId == null || accountId.isEmpty()) { cb.onError("Epic account ID not found — please sign in again"); return; }
-                debug(ctx, "Epic upload — appName=" + appName + " accountId=" + accountId);
+                debug(ctx, "Epic upload — appName=" + appName);
 
                 cb.onStatus("Fetching cloud file list…");
                 List<CloudFile> cloudFiles = listCloudFiles(ctx, accountId, appName, token);
@@ -112,7 +112,7 @@ public final class EpicCloudSaveManager {
                 EpicCredentialStore.Credentials creds = EpicCredentialStore.load(ctx);
                 String accountId = creds != null ? creds.accountId : null;
                 if (accountId == null || accountId.isEmpty()) { cb.onError("Epic account ID not found — please sign in again"); return; }
-                debug(ctx, "Epic download — appName=" + appName + " accountId=" + accountId);
+                debug(ctx, "Epic download — appName=" + appName);
 
                 cb.onStatus("Fetching cloud file list…");
                 List<CloudFile> cloudFiles = listCloudFiles(ctx, accountId, appName, token);
@@ -159,7 +159,8 @@ public final class EpicCloudSaveManager {
     private static List<CloudFile> listCloudFiles(Context ctx, String accountId, String appName, String token)
             throws Exception {
         String urlStr = BASE + accountId + "/" + appName + "/";
-        debug(ctx, "listCloudFiles URL=" + urlStr);
+        // NB: urlStr embeds the Epic accountId in its path — log only the appName.
+        debug(ctx, "listCloudFiles appName=" + appName);
         HttpURLConnection conn = openConn(urlStr, "GET", token);
         int code = conn.getResponseCode();
         debug(ctx, "listCloudFiles HTTP=" + code);
@@ -172,12 +173,12 @@ public final class EpicCloudSaveManager {
             String errBody = "";
             try { errBody = readStream(conn.getErrorStream()); } catch (Exception ignored) {}
             conn.disconnect();
-            debug(ctx, "listCloudFiles error body=" + errBody.substring(0, Math.min(300, errBody.length())));
+            debug(ctx, "listCloudFiles error HTTP " + code);
             throw new Exception("HTTP " + code + " listing saves");
         }
         String body = readStream(conn.getInputStream());
         conn.disconnect();
-        debug(ctx, "listCloudFiles body snippet=" + body.substring(0, Math.min(300, body.length())));
+        debug(ctx, "listCloudFiles body len=" + (body == null ? 0 : body.length()));
 
         List<CloudFile> result = new ArrayList<>();
         if (body == null || body.isEmpty()) return result;
@@ -260,7 +261,7 @@ public final class EpicCloudSaveManager {
             conn.disconnect();
             return code >= 200 && code < 300;
         } catch (Exception e) {
-            Log.e(TAG, "putToPresignedUrl failed", e);
+            Log.e(TAG, "putToPresignedUrl failed: " + e.getClass().getSimpleName());
             return false;
         }
     }
@@ -277,7 +278,7 @@ public final class EpicCloudSaveManager {
             conn.disconnect();
             return data;
         } catch (Exception e) {
-            Log.e(TAG, "getFromPresignedUrl failed", e);
+            Log.e(TAG, "getFromPresignedUrl failed: " + e.getClass().getSimpleName());
             return null;
         }
     }

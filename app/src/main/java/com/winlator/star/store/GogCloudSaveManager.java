@@ -56,7 +56,7 @@ public final class GogCloudSaveManager {
                 String clientId = GogDownloadManager.getOrFetchClientId(ctx, gameId, galaxyToken);
                 String token = getGameScopedToken(ctx, gameId, clientId, prefs);
                 if (token == null) token = galaxyToken; // fallback
-                debug(ctx, "GOG upload — gameId=" + gameId + " userId=" + userId + " clientId=" + clientId + " scopedToken=" + (token.equals(galaxyToken) ? "fallback" : "ok"));
+                debug(ctx, "GOG upload — gameId=" + gameId + " clientId=" + clientId + " scopedToken=" + (token.equals(galaxyToken) ? "fallback" : "ok"));
 
                 cb.onStatus("Fetching cloud file list…");
                 List<CloudFile> cloudFiles = listCloudFiles(ctx, userId, clientId, token);
@@ -99,7 +99,7 @@ public final class GogCloudSaveManager {
 
             } catch (Exception e) {
                 Log.e(TAG, "uploadSaves failed", e);
-                debug(ctx, "uploadSaves exception: " + e.getMessage());
+                debug(ctx, "uploadSaves exception: " + e.getClass().getSimpleName());
                 if ("CLOUD_SAVES_NOT_SUPPORTED".equals(e.getMessage()))
                     cb.onError("This game does not support GOG cloud saves");
                 else
@@ -120,7 +120,7 @@ public final class GogCloudSaveManager {
                 String clientId = GogDownloadManager.getOrFetchClientId(ctx, gameId, galaxyToken);
                 String token = getGameScopedToken(ctx, gameId, clientId, prefs);
                 if (token == null) token = galaxyToken; // fallback
-                debug(ctx, "GOG download — gameId=" + gameId + " userId=" + userId + " clientId=" + clientId + " scopedToken=" + (token.equals(galaxyToken) ? "fallback" : "ok"));
+                debug(ctx, "GOG download — gameId=" + gameId + " clientId=" + clientId + " scopedToken=" + (token.equals(galaxyToken) ? "fallback" : "ok"));
 
                 cb.onStatus("Fetching cloud file list…");
                 List<CloudFile> cloudFiles = listCloudFiles(ctx, userId, clientId, token);
@@ -146,7 +146,7 @@ public final class GogCloudSaveManager {
 
             } catch (Exception e) {
                 Log.e(TAG, "downloadSaves failed", e);
-                debug(ctx, "downloadSaves exception: " + e.getMessage());
+                debug(ctx, "downloadSaves exception: " + e.getClass().getSimpleName());
                 if ("CLOUD_SAVES_NOT_SUPPORTED".equals(e.getMessage()))
                     cb.onError("This game does not support GOG cloud saves");
                 else
@@ -199,7 +199,7 @@ public final class GogCloudSaveManager {
                 return accessToken;
             }
         } catch (Exception e) {
-            debug(ctx, "getGameScopedToken exception: " + e.getMessage());
+            debug(ctx, "getGameScopedToken exception: " + e.getClass().getSimpleName());
         }
         return null;
     }
@@ -225,9 +225,10 @@ public final class GogCloudSaveManager {
     private static List<CloudFile> listCloudFiles(Context ctx, String userId, String clientId, String token)
             throws Exception {
         String url = BASE + userId + "/" + clientId;
-        debug(ctx, "listCloudFiles URL=" + url);
+        // NB: url embeds the GOG userId in its path — log only the clientId.
+        debug(ctx, "listCloudFiles clientId=" + clientId);
         String body = getRequest(url, token);
-        debug(ctx, "listCloudFiles response len=" + (body == null ? "null" : body.length()) + " snippet=" + (body != null ? body.substring(0, Math.min(120, body.length())) : ""));
+        debug(ctx, "listCloudFiles response len=" + (body == null ? "null" : body.length()));
         List<CloudFile> result = new ArrayList<>();
         if (body == null || body.isEmpty()) return result;
         JSONArray arr = new JSONArray(body);
@@ -254,7 +255,7 @@ public final class GogCloudSaveManager {
     private static String getRequest(String urlStr, String token) throws Exception {
         HttpURLConnection conn = openConn(urlStr, "GET", token);
         int code = conn.getResponseCode();
-        Log.d(TAG, "GET " + urlStr + " → " + code);
+        Log.d(TAG, "GET cloud-save → " + code);
         if (code == 404) { conn.disconnect(); return "[]"; }
         if (code < 200 || code >= 300) {
             String errBody = "";

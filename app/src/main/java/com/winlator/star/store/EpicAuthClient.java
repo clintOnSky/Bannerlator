@@ -119,7 +119,7 @@ public class EpicAuthClient {
             return result.accessToken != null ? result : null;
 
         } catch (Exception e) {
-            Log.e(TAG, "Epic postToken failed", e);
+            Log.e(TAG, "Epic postToken failed: " + e.getClass().getSimpleName());
             return null;
         }
     }
@@ -157,12 +157,12 @@ public class EpicAuthClient {
             conn.disconnect();
 
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "Epic GET HTTP " + code + " from " + urlStr + ": " + resp);
+                Log.e(TAG, "Epic GET HTTP " + code + " from " + StoreLog.redactUrl(urlStr) + " (error body suppressed)");
                 return null;
             }
             return resp;
         } catch (Exception e) {
-            Log.e(TAG, "Epic getRequest failed: " + urlStr, e);
+            Log.e(TAG, "Epic getRequest failed: " + StoreLog.redactUrl(urlStr) + " (" + e.getClass().getSimpleName() + ")");
             return null;
         } finally {
             if (conn != null) conn.disconnect();
@@ -183,12 +183,12 @@ public class EpicAuthClient {
 
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "Epic getBytes HTTP " + code + " from " + urlStr);
+                Log.e(TAG, "Epic getBytes HTTP " + code + " from " + StoreLog.redactUrl(urlStr));
                 return null;
             }
             return conn.getInputStream().readAllBytes();
         } catch (Exception e) {
-            Log.e(TAG, "Epic getBytes failed: " + urlStr, e);
+            Log.e(TAG, "Epic getBytes failed: " + StoreLog.redactUrl(urlStr) + " (" + e.getClass().getSimpleName() + ")");
             return null;
         } finally {
             if (conn != null) conn.disconnect();

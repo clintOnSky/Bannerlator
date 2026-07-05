@@ -108,7 +108,7 @@ public final class SteamQrAuthManager {
             } catch (java.util.concurrent.ExecutionException e) {
                 if (cancelled) return;
                 Throwable cause = e.getCause() != null ? e.getCause() : e;
-                Log.e(TAG, "QR auth ExecutionException", cause);
+                Log.e(TAG, "QR auth ExecutionException: " + SteamLogRedactor.redact(Log.getStackTraceString(cause)));
                 String msg = cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
                 mainHandler.post(() -> listener.onFailure(msg));
             } catch (InterruptedException e) {
@@ -116,7 +116,7 @@ public final class SteamQrAuthManager {
                 Log.w(TAG, "QR auth interrupted");
             } catch (Exception e) {
                 if (cancelled) return;
-                Log.e(TAG, "QR auth error", e);
+                Log.e(TAG, "QR auth error: " + SteamLogRedactor.redact(Log.getStackTraceString(e)));
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 mainHandler.post(() -> listener.onFailure(msg));
             }
@@ -157,7 +157,7 @@ public final class SteamQrAuthManager {
                         });
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "URL watcher error", e);
+                    Log.w(TAG, "URL watcher error: " + SteamLogRedactor.redact(Log.getStackTraceString(e)));
                     break;
                 }
             }

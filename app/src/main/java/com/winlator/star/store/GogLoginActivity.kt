@@ -80,19 +80,19 @@ class GogLoginActivity : ComponentActivity() {
     private inner class GogWebViewClient : WebViewClient() {
 
         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-            Log.d(TAG, "pageStarted: $url")
+            Log.d(TAG, "pageStarted: ${StoreLog.redactUrl(url)}")
         }
 
         override fun onPageFinished(view: WebView?, url: String?) {
-            Log.d(TAG, "pageFinished: $url")
+            Log.d(TAG, "pageFinished: ${StoreLog.redactUrl(url)}")
         }
 
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-            Log.e(TAG, "recvError: ${error?.errorCode} ${error?.description} url=${request?.url} mainFrame=${request?.isForMainFrame}")
+            Log.e(TAG, "recvError: ${error?.errorCode} ${error?.description} url=${StoreLog.redactUrl(request?.url?.toString())} mainFrame=${request?.isForMainFrame}")
         }
 
         override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
-            Log.e(TAG, "recvHttpError: ${errorResponse?.statusCode} ${errorResponse?.reasonPhrase} url=${request?.url} mainFrame=${request?.isForMainFrame}")
+            Log.e(TAG, "recvHttpError: ${errorResponse?.statusCode} ${errorResponse?.reasonPhrase} url=${StoreLog.redactUrl(request?.url?.toString())} mainFrame=${request?.isForMainFrame}")
         }
 
         override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {

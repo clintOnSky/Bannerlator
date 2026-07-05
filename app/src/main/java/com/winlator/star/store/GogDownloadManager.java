@@ -829,7 +829,7 @@ public final class GogDownloadManager {
             }
             conn.disconnect();
         } catch (Exception e) {
-            Log.e(TAG, "downloadWithProgress failed", e);
+            Log.e(TAG, "downloadWithProgress failed: " + e.getClass().getSimpleName());
         }
     }
 
@@ -917,7 +917,7 @@ public final class GogDownloadManager {
             conn.disconnect();
             return true;
         } catch (Exception e) {
-            Log.w(TAG, "downloadRange failed: " + url, e);
+            Log.w(TAG, "downloadRange failed: " + out.getName() + " (" + e.getClass().getSimpleName() + ")");
             return false;
         }
     }
@@ -1266,7 +1266,7 @@ public final class GogDownloadManager {
             }
             return total > 0 ? total : -1;
         } catch (Exception e) {
-            Log.w(TAG, "fetchInstallSizeBytes " + gameId + ": " + e.getMessage());
+            Log.w(TAG, "fetchInstallSizeBytes " + gameId + ": " + e.getClass().getSimpleName());
             return -1;
         }
     }
@@ -1425,7 +1425,7 @@ public final class GogDownloadManager {
                 return clientId;
             }
         } catch (Exception e) {
-            Log.w(TAG, "getOrFetchClientId failed for " + gameId, e);
+            Log.w(TAG, "getOrFetchClientId failed for " + gameId + ": " + e.getClass().getSimpleName());
         }
         return gameId; // last resort fallback
     }

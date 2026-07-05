@@ -68,7 +68,7 @@ class EpicLoginActivity : ComponentActivity() {
 
             val authCode = extractField(result, "authorizationCode")
             if (authCode.isNullOrEmpty()) {
-                Log.e(TAG, "authorizationCode not found in page: $result")
+                Log.e(TAG, "authorizationCode not found in redirect page (len=${result.length})")
                 codeCaptured.set(false)
                 resultBarMsg = "Epic login failed, please try again"
                 view.loadUrl(AUTH_URL)
