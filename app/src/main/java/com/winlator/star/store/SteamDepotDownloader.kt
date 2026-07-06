@@ -8,6 +8,8 @@ import com.winlator.star.store.download.DownloadEntry
 import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.formatDownloadSpeed
+import com.winlator.star.store.download.formatEta
 import `in`.dragonbra.javasteam.depotdownloader.DepotDownloader
 import `in`.dragonbra.javasteam.depotdownloader.IDownloadListener
 import `in`.dragonbra.javasteam.depotdownloader.data.AppItem
@@ -432,9 +434,11 @@ object SteamDepotDownloader {
             DownloadRegistry.update(dmKey) { it.copy(state = DownloadState.DOWNLOADING) }
         }
 
-        // Build the 4-field progress event: install pair + download pair.
-        fun emitProgress(iDone: Long, iTotal: Long, dDone: Long, dTotal: Long) {
-            repo.emit("DownloadProgress:$appId:$iDone:$iTotal:$dDone:$dTotal")
+        // Build the progress event: install pair + download pair + ETA(sec) + speed(bytes/s).
+        // etaSeconds < 0 = unknown (not yet measured / paused); speedBps 0 = unknown.
+        fun emitProgress(iDone: Long, iTotal: Long, dDone: Long, dTotal: Long,
+                         etaSeconds: Long = -1L, speedBps: Long = 0L) {
+            repo.emit("DownloadProgress:$appId:$iDone:$iTotal:$dDone:$dTotal:$etaSeconds:$speedBps")
         }
 
         // Derive the three pipeline-stage caps from CPU cores × the selected tier's ratios
@@ -483,6 +487,14 @@ object SteamDepotDownloader {
         val gotDepotKeyOrChunk = AtomicBoolean(false)
         // Throttle FGS notification updates to whole-percent changes (chunks fire far too often).
         val lastNotifiedPct = AtomicInteger(-1)
+
+        // Smoothed download speed + ETA. Chunk callbacks fire many times/sec and can be concurrent,
+        // so sample the compressed-byte rate at most once/sec under a lock and feed it through an EMA
+        // (a raw remaining/instant-speed ETA flickers wildly). smoothedBps 0 / eta -1 = unknown.
+        val rateLock = Any()
+        var smoothedBps = 0.0
+        var lastRateMs = System.currentTimeMillis()
+        var lastRateBytes = downloadBase
 
         downloader.addListener(object : IDownloadListener {
             override fun onDownloadStarted(item: DownloadItem) {
@@ -534,9 +546,31 @@ object SteamDepotDownloader {
                 // Overall % is the aggregate install fraction (what's actually on disk),
                 // clamped to 99 — 100% is reserved for onDownloadCompleted.
                 val pct = if (iTotal > 0L) minOf((installDone * 100 / iTotal).toInt(), 99) else 0
+
+                // Smoothed speed + ETA from the compressed-byte rate (network is what "time left" means).
+                var etaSeconds = -1L
+                var speedBps = 0L
+                synchronized(rateLock) {
+                    val now = System.currentTimeMillis()
+                    val dtMs = now - lastRateMs
+                    if (dtMs >= 1000L) {
+                        val delta = downloadDone - lastRateBytes
+                        if (delta > 0L) {
+                            val inst = delta * 1000.0 / dtMs
+                            smoothedBps = if (smoothedBps <= 0.0) inst else 0.6 * smoothedBps + 0.4 * inst
+                        }
+                        lastRateMs = now
+                        lastRateBytes = downloadDone
+                    }
+                    speedBps = smoothedBps.toLong()
+                    if (smoothedBps > 0.0 && dTotal > downloadDone) {
+                        etaSeconds = ((dTotal - downloadDone) / smoothedBps).toLong()
+                    }
+                }
+
                 dlog("Chunk: depot=$depotId $pct% install=${fmtSize(installDone)}/${fmtSize(iTotal)} " +
                         "download=${fmtSize(downloadDone)}/${fmtSize(dTotal)}")
-                emitProgress(installDone, iTotal, downloadDone, dTotal)
+                emitProgress(installDone, iTotal, downloadDone, dTotal, etaSeconds, speedBps)
                 db.updateDownloadProgress(appId, installDone)
                 // Mirror the exact same figures into the Download Manager registry (no recompute).
                 DownloadRegistry.update(dmKey) {
@@ -547,14 +581,20 @@ object SteamDepotDownloader {
                         installTotal = iTotal,
                         downloadDone = downloadDone,
                         downloadTotal = dTotal,
+                        etaSeconds = etaSeconds,
+                        speedBps = speedBps,
                     )
                 }
 
-                // FGS notification: honest "Downloading <game> — N%", throttled to whole-percent
-                // changes so chunk spam doesn't thrash the notification. Reverted to the connection
-                // status in the finally (repo.refreshFgsStatus()). Static no-op if the FGS is down.
+                // FGS notification: "Downloading <game> — N% · <speed> · <eta>", throttled to
+                // whole-percent changes so chunk spam doesn't thrash the notification. Reverted to the
+                // connection status in the finally (repo.refreshFgsStatus()). No-op if the FGS is down.
                 if (lastNotifiedPct.getAndSet(pct) != pct) {
-                    try { SteamForegroundService.setStatusText("Downloading ${row.name} — $pct%") }
+                    val extra = buildString {
+                        if (speedBps > 0L)    append(" · ${formatDownloadSpeed(speedBps)}")
+                        if (etaSeconds >= 0L) append(" · ${formatEta(etaSeconds)}")
+                    }
+                    try { SteamForegroundService.setStatusText("Downloading ${row.name} — $pct%$extra") }
                     catch (_: Throwable) {}
                 }
             }

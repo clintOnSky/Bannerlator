@@ -70,6 +70,8 @@ import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.Store
 import com.winlator.star.store.download.StoreStyle
 import com.winlator.star.store.download.formatDownloadSize
+import com.winlator.star.store.download.formatDownloadSpeed
+import com.winlator.star.store.download.formatEta
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 import java.io.File
@@ -601,11 +603,16 @@ private fun ActiveContent(
     // Byte pair only for byte-feeding stores; pct-only stores (GOG) show just the percentage
     // instead of a misleading "(0 KB / 0 KB)".
     val sizePart = if (hasBytes) "  (${fmtSizeDm(entry.installDone)} / ${fmtSizeDm(entry.installTotal)})" else ""
+    // Speed + ETA only while actively downloading (unknown when paused/queued).
+    val speedEta = buildString {
+        val s = formatDownloadSpeed(entry.speedBps); if (s.isNotEmpty()) append("  ·  $s")
+        val e = formatEta(entry.etaSeconds);          if (e.isNotEmpty()) append("  ·  $e")
+    }
     Text(
         text = when (entry.state) {
             DownloadState.PAUSED -> "Paused — $pct%$sizePart"
             DownloadState.QUEUED -> "Queued…"
-            else -> "Downloading… $pct%$sizePart"
+            else -> "Downloading… $pct%$sizePart$speedEta"
         },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,

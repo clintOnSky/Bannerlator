@@ -66,6 +66,8 @@ import com.winlator.star.store.compose.AddToShortcutsRequest
 import com.winlator.star.store.compose.ContainerPickerDialog
 import com.winlator.star.store.compose.openShortcutsScreen
 import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.formatDownloadSpeed
+import com.winlator.star.store.download.formatEta
 import com.winlator.star.ui.theme.WinlatorTheme
 import java.io.File
 import java.net.URL
@@ -304,7 +306,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                 steamStatus = try { SteamRepository.SteamStatus.valueOf(name) } catch (e: Exception) { steamStatus }
             }
             event.startsWith("DownloadProgress:") -> {
-                // Format: DownloadProgress:appId:installDone:installTotal:downloadDone:downloadTotal
+                // Format: DownloadProgress:appId:installDone:installTotal:downloadDone:downloadTotal:etaSec:speedBps
                 val parts = event.split(":")
                 val id    = parts.getOrNull(1)?.toIntOrNull() ?: return
                 if (id != appId) return
@@ -312,14 +314,20 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                 val iTotal = parts.getOrNull(3)?.toLongOrNull() ?: 1L
                 val dDone  = parts.getOrNull(4)?.toLongOrNull() ?: iDone
                 val dTotal = parts.getOrNull(5)?.toLongOrNull() ?: iTotal
+                val etaSec = parts.getOrNull(6)?.toLongOrNull() ?: -1L
+                val speed  = parts.getOrNull(7)?.toLongOrNull() ?: 0L
                 val iPct   = if (iTotal > 0) (iDone * 100 / iTotal).toInt().coerceIn(0, 100) else 0
                 val dPct   = if (dTotal > 0) (dDone * 100 / dTotal).toInt().coerceIn(0, 100) else 0
                 progressVisible = true
                 progressValue = iPct               // solid install fill (bytes on disk)
                 downloadProgressValue = dPct        // lighter download fill (bytes fetched)
                 progressTextVisible = true
-                // %/size text is the INSTALL fraction — what's actually on disk.
-                progressText = "Downloading… $iPct%  (${fmtSize(iDone)} / ${fmtSize(iTotal)})"
+                // %/size text is the INSTALL fraction — what's actually on disk; append speed + ETA.
+                val speedEta = buildString {
+                    val s = formatDownloadSpeed(speed); if (s.isNotEmpty()) append("  ·  $s")
+                    val e = formatEta(etaSec);          if (e.isNotEmpty()) append("  ·  $e")
+                }
+                progressText = "Downloading… $iPct%  (${fmtSize(iDone)} / ${fmtSize(iTotal)})$speedEta"
                 installBtnEnabled = true
                 installBtnText = "Cancel"
                 installAction = InstallAction.CANCEL
