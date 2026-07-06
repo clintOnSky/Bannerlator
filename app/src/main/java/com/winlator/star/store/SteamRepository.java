@@ -948,6 +948,12 @@ public final class SteamRepository {
     private void processApps(List<PICSProductInfo> apps) {
         // All app info received — parse and store games
         SteamDatabase db = SteamDatabase.getInstance();
+        // AppIds the account is licensed for — used to skip DLC depots the user doesn't own
+        // (an owned game's depot list includes its DLC depots; selecting an UNOWNED one makes the
+        // download engine try a depot it has no key for → "not available from this account" → 0 bytes
+        // → the completion guard falsely fails the whole, complete, OWNED game). See appId 313830
+        // "See No Evil": depot 320210 = its "Official Soundtrack" DLC the user didn't own.
+        java.util.Set<Integer> licensedApps = new java.util.HashSet<>(db.getLicensedAppIds());
         int count = 0;
         for (PICSProductInfo app : apps) {
                     try {
@@ -1054,6 +1060,20 @@ public final class SteamRepository {
                                     Log.d(TAG, "app " + app.getId() + " skip depot " + depotId + " lowviolence");
                                     skippedCount++; continue;
                                 }
+                                // Skip DLC depots the account doesn't own. A DLC depot carries
+                                // config/dlcappid = the DLC's appId; include it only if that DLC is
+                                // licensed. (Prevents the unowned-DLC-depot false-install-failure.)
+                                String dlcAppIdStr = kvStr(config.get("dlcappid")).trim();
+                                if (!dlcAppIdStr.isEmpty()) {
+                                    try {
+                                        int dlcAppId = Integer.parseInt(dlcAppIdStr);
+                                        if (!licensedApps.contains(dlcAppId)) {
+                                            Log.d(TAG, "app " + app.getId() + " skip depot " + depotId
+                                                    + " dlcappid=" + dlcAppId + " (DLC not owned)");
+                                            skippedCount++; continue;
+                                        }
+                                    } catch (NumberFormatException ignored) {}
+                                }
 
                                 // Selected — count it.
                                 if (depotSb.length() > 0) depotSb.append(',');
@@ -1095,6 +1115,9 @@ public final class SteamRepository {
 
                         db.upsertGame(app.getId(), name, icon, totalSize, depotSb.toString(), type,
                                 developer, metacriticScore, genreSb.toString());
+                        // Drop any depot rows no longer selected (e.g. an unowned DLC depot a
+                        // pre-filter sync stored) so the completion guard can't fail on them.
+                        db.pruneDepots(app.getId(), depotSb.toString());
                         count++;
                     } catch (Exception e) {
                         Log.w(TAG, "Skipping app " + app.getId() + ": " + e.getMessage());

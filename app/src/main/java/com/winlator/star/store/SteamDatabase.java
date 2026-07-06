@@ -486,6 +486,22 @@ public final class SteamDatabase extends SQLiteOpenHelper {
                 "depot_manifests", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
+    /**
+     * Drop depot rows for an app that are no longer in the current SELECTED set — e.g. an unowned DLC
+     * depot that a pre-filter sync had stored. Without this, upsert (add/update only) would leave the
+     * stale depot behind and the completion guard would keep failing on it. selectedCsv is the
+     * comma-separated selected depot ids (all validated ints, safe to inline); empty → drop all.
+     */
+    public void pruneDepots(int appId, String selectedCsv) {
+        SQLiteDatabase db = getWritableDatabase();
+        if (selectedCsv == null || selectedCsv.isEmpty()) {
+            db.delete("depot_manifests", "app_id = ?", new String[]{String.valueOf(appId)});
+        } else {
+            db.delete("depot_manifests", "app_id = ? AND depot_id NOT IN (" + selectedCsv + ")",
+                    new String[]{String.valueOf(appId)});
+        }
+    }
+
     /** All depots (with manifest IDs + resolved real sizes) for a given app. */
     public List<DepotManifestRow> getDepotManifests(int appId) {
         List<DepotManifestRow> rows = new ArrayList<>();
