@@ -32,7 +32,7 @@ public class EpicCredentialStore {
                     .putLong("expires_at",      creds.expiresAt)
                     .apply();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to save Epic credentials", e);
+            Log.e(TAG, "Failed to save Epic credentials: " + e.getClass().getSimpleName());
         }
     }
 
@@ -50,7 +50,7 @@ public class EpicCredentialStore {
             creds.expiresAt    = sp.getLong("expires_at",      0L);
             return creds;
         } catch (Exception e) {
-            Log.e(TAG, "Failed to load Epic credentials", e);
+            Log.e(TAG, "Failed to load Epic credentials: " + e.getClass().getSimpleName());
             return null;
         }
     }

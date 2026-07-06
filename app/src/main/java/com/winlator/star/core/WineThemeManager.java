@@ -20,12 +20,14 @@ import java.io.File;
 public abstract class WineThemeManager {
     public enum Theme {LIGHT, DARK}
     public enum BackgroundType {IMAGE, COLOR}
+    public enum BackgroundScope {GLOBAL, CONTAINER}
     public static final String DEFAULT_DESKTOP_THEME = Theme.LIGHT+","+BackgroundType.IMAGE+",#0277bd";
 
     public static class ThemeInfo {
         public final Theme theme;
         public final BackgroundType backgroundType;
         public final int backgroundColor;
+        public final BackgroundScope wallpaperScope;
 
         public ThemeInfo(String value) {
             String[] values = value.split(",");
@@ -38,15 +40,28 @@ public abstract class WineThemeManager {
                 backgroundType = BackgroundType.valueOf(values[1]);
                 backgroundColor = Color.parseColor(values[2]);
             }
+            // Slot 3 (values[3]) is the wallpaper scope for IMAGE backgrounds. Legacy strings
+            // stored a numeric mtime here instead, so a non-enum token must fall back to GLOBAL
+            // to preserve existing containers' behavior (shared wallpaper).
+            BackgroundScope scope = BackgroundScope.GLOBAL;
+            if (values.length >= 4) {
+                try {
+                    scope = BackgroundScope.valueOf(values[3]);
+                }
+                catch (IllegalArgumentException e) {
+                    scope = BackgroundScope.GLOBAL;
+                }
+            }
+            wallpaperScope = scope;
         }
     }
 
-    public static void apply(Context context, ThemeInfo themeInfo, ScreenInfo screenInfo) {
+    public static void apply(Context context, ThemeInfo themeInfo, ScreenInfo screenInfo, int containerId) {
         File rootDir = ImageFs.find(context).getRootDir();
         File userRegFile = new File(rootDir, ImageFs.WINEPREFIX+"/user.reg");
         String background = Color.red(themeInfo.backgroundColor)+" "+Color.green(themeInfo.backgroundColor)+" "+Color.blue(themeInfo.backgroundColor);
 
-        if (themeInfo.backgroundType == BackgroundType.IMAGE) createWallpaperBMPFile(context, screenInfo);
+        if (themeInfo.backgroundType == BackgroundType.IMAGE) createWallpaperBMPFile(context, screenInfo, themeInfo.wallpaperScope, containerId);
 
         try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
             if (themeInfo.backgroundType == BackgroundType.IMAGE) {
@@ -121,7 +136,7 @@ public abstract class WineThemeManager {
         }
     }
 
-    private static void createWallpaperBMPFile(Context context, ScreenInfo screenInfo) {
+    private static void createWallpaperBMPFile(Context context, ScreenInfo screenInfo, BackgroundScope scope, int containerId) {
         final int outputHeight = screenInfo.height;
         int outputWidth = screenInfo.width;
 
@@ -129,8 +144,8 @@ public abstract class WineThemeManager {
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         Canvas canvas = new Canvas(outputBitmap);
 
-        File userWallpaperFile = getUserWallpaperFile(context);
-        if (userWallpaperFile.isFile()) {
+        File userWallpaperFile = resolveWallpaperSource(context, scope, containerId);
+        if (userWallpaperFile != null) {
             Bitmap image = BitmapFactory.decodeFile(userWallpaperFile.getPath());
             Rect srcRect = new Rect(0, 0, image.getWidth(), image.getHeight());
             Rect dstRect = new Rect(0, 0, outputWidth, outputHeight);
@@ -167,7 +182,55 @@ public abstract class WineThemeManager {
         MSBitmap.create(outputBitmap, new File(imageFs.getRootDir(), ImageFs.CACHE_PATH+"/wallpaper.bmp"));
     }
 
+    /**
+     * The user-set wallpaper source for the given scope, or null when none is set (meaning "use the
+     * bundled/marcescence default"). CONTAINER scope prefers the per-container file, then falls back
+     * to the global file, then to null — so a container scope never yields a blank desktop.
+     */
+    private static File resolveWallpaperSource(Context context, BackgroundScope scope, int containerId) {
+        if (scope == BackgroundScope.CONTAINER) {
+            File perContainer = getUserWallpaperFile(context, containerId);
+            if (perContainer.isFile()) return perContainer;
+        }
+        File global = getUserWallpaperFile(context);
+        if (global.isFile()) return global;
+        return null;
+    }
+
+    /**
+     * True when the launching container's cached wallpaper.bmp is missing or older than the user's
+     * chosen wallpaper source file. Used at launch to regenerate every IMAGE background container's
+     * bmp after its source wallpaper changes — notably a GLOBAL wallpaper edited while a DIFFERENT
+     * container was active, which the per-container theme string alone can't detect. Returns false
+     * when there is no user-set source (the default path is static) so we don't regenerate every
+     * launch. wallpaper.bmp resolves through the home/xuser symlink, so it is the LAUNCHING
+     * container's bmp (activateContainer() repoints the symlink before this runs).
+     */
+    public static boolean wallpaperNeedsRegen(Context context, ThemeInfo themeInfo, int containerId) {
+        if (themeInfo.backgroundType != BackgroundType.IMAGE) return false;
+        File src = resolveWallpaperSource(context, themeInfo.wallpaperScope, containerId);
+        if (src == null || !src.isFile()) return false;
+        File bmp = new File(ImageFs.find(context).getRootDir(), ImageFs.CACHE_PATH+"/wallpaper.bmp");
+        return !bmp.isFile() || src.lastModified() > bmp.lastModified();
+    }
+
+    // User wallpaper source files live in a fixed, non-symlinked directory that sits BESIDE the
+    // per-container home/xuser-N dirs (not under the home/xuser symlink, which resolves to whatever
+    // container is currently active). This is what makes a GLOBAL wallpaper actually shared across
+    // all containers, and lets a per-container file be written correctly even when the editor's
+    // active container differs from the one being edited — both the editor process and the
+    // launching XServer resolve the same path regardless of the active-container symlink.
+    private static final String WALLPAPER_DIR = "home/.wallpapers";
+
+    private static File wallpaperDir(Context context) {
+        return new File(ImageFs.find(context).getRootDir(), WALLPAPER_DIR);
+    }
+
     public static File getUserWallpaperFile(Context context) {
-        return new File(ImageFs.find(context).getRootDir(), ImageFs.CONFIG_PATH+"/user-wallpaper.png");
+        return new File(wallpaperDir(context), "user-wallpaper.png");
+    }
+
+    public static File getUserWallpaperFile(Context context, int containerId) {
+        return new File(wallpaperDir(context), "user-wallpaper-"+containerId+".png");
     }
 }

@@ -50,10 +50,16 @@ fun MagnifierOverlay(state: XServerDialogState) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect {
             window?.apply {
+                // A Compose Dialog window applies FLAG_DIM_BEHIND by default, which dims the WHOLE
+                // game surface behind the tiny magnifier control. Clear it (+ dimAmount 0) so the
+                // magnified frame stays at full brightness — matches PauseBoxOverlay. Renderer-
+                // independent: this is a window flag over the game surface, so it fixes GL AND Vulkan.
+                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
                 addFlags(
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 )
+                setDimAmount(0f)
                 setGravity(Gravity.TOP or Gravity.START)
                 val attrs = attributes
                 attrs.x = offsetX.roundToInt()

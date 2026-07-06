@@ -107,14 +107,14 @@ public class AmazonDownloadManager {
                 Log.e(TAG, "getGameDownload failed for: " + game.title);
                 return false;
             }
-            dbg.append("downloadUrl=").append(spec.downloadUrl).append("\n");
+            dbg.append("downloadUrl=").append(StoreLog.redactUrl(spec.downloadUrl)).append("\n");
             dbg.append("versionId=").append(spec.versionId).append("\n");
-            log("downloadUrl: " + spec.downloadUrl);
+            log("downloadUrl: " + StoreLog.redactUrl(spec.downloadUrl));
 
             // Step 2: Download manifest
             log("Downloading manifest.proto...");
             String manifestUrl = AmazonApiClient.appendPath(spec.downloadUrl, "manifest.proto");
-            dbg.append("manifestUrl=").append(manifestUrl).append("\n");
+            dbg.append("manifestUrl=").append(StoreLog.redactUrl(manifestUrl)).append("\n");
             byte[] manifestBytes = AmazonApiClient.getBytes(manifestUrl, accessToken);
             if (manifestBytes == null) {
                 dbg.append("ERROR: manifest download failed\n");
@@ -327,7 +327,7 @@ public class AmazonDownloadManager {
 
         int code = conn.getResponseCode();
         if (code < 200 || code >= 300) {
-            Log.e(TAG, "HTTP " + code + " for: " + urlStr);
+            Log.e(TAG, "HTTP " + code + " for: " + StoreLog.redactUrl(urlStr));
             conn.disconnect();
             throw new IOException("HTTP " + code);
         }
@@ -389,7 +389,7 @@ public class AmazonDownloadManager {
             return (manifest != null && manifest.totalInstallSize > 0)
                     ? manifest.totalInstallSize : -1;
         } catch (Exception e) {
-            Log.w(TAG, "fetchInstallSizeBytes Amazon: " + e.getMessage());
+            Log.w(TAG, "fetchInstallSizeBytes Amazon: " + e.getClass().getSimpleName());
             return -1;
         }
     }

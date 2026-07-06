@@ -366,6 +366,16 @@
         <item name="android:textColor">@color/white</item>
     </style>
 
+    <!-- Dark theme for the framework android.app.AlertDialogs the store launch flow shows
+         (StarLaunchBridge container picker + the store exe pickers). Without a theme these
+         render as a white light-theme dialog that clashes with the dark Compose UI. Material
+         (non-.Light) parent = dark surface + light text; accent tints the buttons. -->
+    <style name="StoreAlertDialogDark" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">@color/colorAccent</item>
+        <item name="android:windowBackground">@color/content_dialog_background_dark</item>
+        <item name="android:textColorPrimary">@color/white</item>
+    </style>
+
     <style name="Base.Widget.AppCompat.SeekBar" parent="@android:style/Widget.Material.SeekBar" />
     <style name="Base.Widget.AppCompat.SeekBar.Discrete" parent="@style/Base.Widget.AppCompat.SeekBar">
         <item name="tickMark">@drawable/abc_seekbar_tick_mark_material</item>

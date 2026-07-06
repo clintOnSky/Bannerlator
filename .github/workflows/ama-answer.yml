@@ -9,8 +9,9 @@ name: "🤖 AMA — Answer the AI"
 # - A maintainer can force a re-run on any older issue by adding the `question` label.
 # - All untrusted text (issue body, question, model answer) is passed via `env:`
 #   and referenced as quoted variables — never inlined into a run:/script: body.
-# - opencode runs sandboxed (bash/write/edit/webfetch off — see ama-agent.md);
-#   the token is contents:read only and not persisted, so nothing can edit code.
+# - opencode runs sandboxed as a read-only Q&A agent (bash/write/edit/webfetch
+#   off — enforced in .opencode/agent/ama-agent.md); the token is contents:read
+#   only and not persisted, so nothing can edit code.
 
 on:
   issues:
@@ -159,10 +160,20 @@ jobs:
           --pure \
           2>/dev/null || true)
 
-        ANSWER=$(printf '%s' "$OUTPUT" | jq -s '
-          [.[] | select(.type == "text" and .part.type == "text") | .part.text]
-          | join("\n\n")
-        ' --raw-output 2>/dev/null || true)
+        # Post ONLY the final assistant message, not the whole run. The old
+        # code joined every text part, so any intermediate reasoning/narration
+        # ("Let me look at…", plans, "Build successful") leaked into the comment
+        # and read as if a fix had been implemented. Here we find the messageID
+        # of the last text part (stream order is preserved by `-s`), then join
+        # just that message's text parts. If parts carry no messageID, every
+        # match has a null id and this degrades to "join all" — still safe once
+        # the ama-agent persona stops emitting task narration.
+        ANSWER=$(printf '%s' "$OUTPUT" | jq -s -r '
+          [ .[] | select(.type == "text" and .part.type == "text") ] as $t
+          | ( $t | last | .part.messageID ) as $mid
+          | [ $t[] | select(.part.messageID == $mid) | .part.text ]
+          | join("")
+        ' 2>/dev/null || true)
 
         if [ -z "$ANSWER" ] || [ "$ANSWER" = "null" ]; then
           ANSWER="⚠️ No answer generated. The AI may have timed out or hit an error."

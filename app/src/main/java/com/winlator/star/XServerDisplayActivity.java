@@ -1855,8 +1855,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         String desktopTheme = container.getDesktopTheme();
-        if (!(desktopTheme+","+xServer.screenInfo).equals(container.getExtra("desktopTheme"))) {
-            WineThemeManager.apply(this, new WineThemeManager.ThemeInfo(desktopTheme), xServer.screenInfo);
+        WineThemeManager.ThemeInfo themeInfo = new WineThemeManager.ThemeInfo(desktopTheme);
+        boolean themeChanged = !(desktopTheme+","+xServer.screenInfo).equals(container.getExtra("desktopTheme"));
+        // Also regenerate when the source wallpaper is newer than this container's cached bmp, so a
+        // GLOBAL wallpaper changed while editing another container still propagates here on launch.
+        if (themeChanged || WineThemeManager.wallpaperNeedsRegen(this, themeInfo, container.id)) {
+            WineThemeManager.apply(this, themeInfo, xServer.screenInfo, container.id);
             container.putExtra("desktopTheme", desktopTheme+","+xServer.screenInfo);
             containerDataChanged = true;
         }

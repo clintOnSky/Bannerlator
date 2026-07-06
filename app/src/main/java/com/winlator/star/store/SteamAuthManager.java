@@ -109,14 +109,14 @@ public final class SteamAuthManager {
 
             } catch (java.util.concurrent.ExecutionException e) {
                 Throwable cause = e.getCause() != null ? e.getCause() : e;
-                Log.e(TAG, "Login ExecutionException", cause);
+                Log.e(TAG, "Login ExecutionException: " + SteamLogRedactor.redact(Log.getStackTraceString(cause)));
                 String msg = cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
                 mainHandler.post(() -> listener.onFailure(msg));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 Log.w(TAG, "Auth interrupted");
             } catch (Exception e) {
-                Log.e(TAG, "Login error", e);
+                Log.e(TAG, "Login error: " + SteamLogRedactor.redact(Log.getStackTraceString(e)));
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 mainHandler.post(() -> listener.onFailure(msg));
             }

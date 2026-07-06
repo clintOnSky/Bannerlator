@@ -199,7 +199,7 @@ public class AmazonSdkManager {
 
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "SDK file HTTP " + code + ": " + urlStr);
+                Log.e(TAG, "SDK file HTTP " + code + ": " + StoreLog.redactUrl(urlStr));
                 conn.disconnect();
                 return false;
             }

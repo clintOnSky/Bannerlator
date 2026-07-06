@@ -12,9 +12,9 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import com.winlator.star.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -80,19 +80,19 @@ class GogLoginActivity : ComponentActivity() {
     private inner class GogWebViewClient : WebViewClient() {
 
         override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-            Log.d(TAG, "pageStarted: $url")
+            Log.d(TAG, "pageStarted: ${StoreLog.redactUrl(url)}")
         }
 
         override fun onPageFinished(view: WebView?, url: String?) {
-            Log.d(TAG, "pageFinished: $url")
+            Log.d(TAG, "pageFinished: ${StoreLog.redactUrl(url)}")
         }
 
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-            Log.e(TAG, "recvError: ${error?.errorCode} ${error?.description} url=${request?.url} mainFrame=${request?.isForMainFrame}")
+            Log.e(TAG, "recvError: ${error?.errorCode} ${error?.description} url=${StoreLog.redactUrl(request?.url?.toString())} mainFrame=${request?.isForMainFrame}")
         }
 
         override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
-            Log.e(TAG, "recvHttpError: ${errorResponse?.statusCode} ${errorResponse?.reasonPhrase} url=${request?.url} mainFrame=${request?.isForMainFrame}")
+            Log.e(TAG, "recvHttpError: ${errorResponse?.statusCode} ${errorResponse?.reasonPhrase} url=${StoreLog.redactUrl(request?.url?.toString())} mainFrame=${request?.isForMainFrame}")
         }
 
         override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
@@ -168,12 +168,20 @@ class GogLoginActivity : ComponentActivity() {
             ed.putInt("bh_gog_expires_in", 3600)
             ed.apply()
 
-            Log.d(TAG, "Login saved for: $username")
+            Log.d(TAG, "GOG login saved OK")   // don't log username (PII)
             withContext(Dispatchers.Main) { finish() }
         } catch (e: Exception) {
             Log.e(TAG, "Login post-processing failed", e)
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@GogLoginActivity, "Login error, please try again", Toast.LENGTH_SHORT).show()
+                // Not a Compose screen (plain WebView via setContentView), so the shared
+                // UninstallResultBar can't apply — use the themed dark dialog instead of a
+                // black-box Toast.
+                if (!isFinishing && !isDestroyed) {
+                    android.app.AlertDialog.Builder(this@GogLoginActivity, R.style.StoreAlertDialogDark)
+                        .setMessage("Login error, please try again")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
                 webViewRef?.loadUrl(AUTH_URL)
             }
         }

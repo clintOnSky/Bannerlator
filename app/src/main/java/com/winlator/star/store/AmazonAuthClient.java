@@ -130,7 +130,7 @@ public class AmazonAuthClient {
             return result;
 
         } catch (Exception e) {
-            Log.e(TAG, "refreshAccessToken failed", e);
+            Log.e(TAG, "refreshAccessToken failed: " + e.getClass().getSimpleName());
             return null;
         }
     }
@@ -188,13 +188,13 @@ public class AmazonAuthClient {
             conn.disconnect();
 
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "HTTP " + code + " from " + urlStr + ": " + resp);
+                Log.e(TAG, "HTTP " + code + " from " + StoreLog.redactUrl(urlStr) + " (error body suppressed)");
                 return null;
             }
             return resp;
 
         } catch (Exception e) {
-            Log.e(TAG, "postJson failed: " + urlStr, e);
+            Log.e(TAG, "postJson failed: " + StoreLog.redactUrl(urlStr) + " (" + e.getClass().getSimpleName() + ")");
             return null;
         }
     }
@@ -222,13 +222,13 @@ public class AmazonAuthClient {
             conn.disconnect();
 
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "HTTP GET " + code + " from " + urlStr);
+                Log.e(TAG, "HTTP GET " + code + " from " + StoreLog.redactUrl(urlStr));
                 return null;
             }
             return resp;
 
         } catch (Exception e) {
-            Log.e(TAG, "getRequest failed: " + urlStr, e);
+            Log.e(TAG, "getRequest failed: " + StoreLog.redactUrl(urlStr) + " (" + e.getClass().getSimpleName() + ")");
             return null;
         }
     }

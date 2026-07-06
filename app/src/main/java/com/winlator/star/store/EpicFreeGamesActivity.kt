@@ -25,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,6 +38,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreStyle
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -284,26 +288,26 @@ private fun EpicFreeGamesScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D0D0D)),
+            .background(MaterialTheme.colorScheme.background),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF0F1117))
+                .background(MaterialTheme.colorScheme.background)
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
                 onClick = onBack,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 shape = RoundedCornerShape(4.dp),
                 modifier = Modifier.height(40.dp),
-            ) { Text("\u2190", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u2190", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp) }
             Text(
                 text = "Free Games",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF0078F0),
+                color = StoreStyle.accent(Store.EPIC), // Epic brand blue (store identity)
                 modifier = Modifier.weight(1f).padding(start = 12.dp),
             )
             Text(
@@ -312,22 +316,24 @@ private fun EpicFreeGamesScreen(
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 modifier = Modifier
-                    .background(Color(0xFF0078F0), RoundedCornerShape(4.dp))
+                    .background(StoreStyle.accent(Store.EPIC), RoundedCornerShape(4.dp)) // Epic brand badge
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
+            // ⬇ cross-store Download Manager (global active-count badge).
+            DownloadsButton()
         }
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF111111))
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = statusText,
                 fontSize = 13.sp,
-                color = Color(0xFFCCCCCC),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -379,10 +385,11 @@ private fun FreeGameCard(
             .fillMaxWidth()
             .padding(bottom = 8.dp)
             .clickable { onClick() },
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0A1A2A)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(
             1.dp,
+            // semantic free/soon accent border (not app-theme chrome)
             if (isFree) Color(0xFF0D5CA8) else Color(0xFF443300),
         ),
     ) {
@@ -408,7 +415,7 @@ private fun FreeGameCard(
                     text = game.title,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFEEEEEE),
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -416,7 +423,7 @@ private fun FreeGameCard(
                     Text(
                         text = game.dateRange,
                         fontSize = 11.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -426,7 +433,8 @@ private fun FreeGameCard(
                 Text(
                     text = "\u2192",
                     fontSize = 18.sp,
-                    color = if (isFree) Color(0xFF0078F0) else Color(0xFF888866),
+                    // free = Epic-brand "open store" cue; upcoming = muted
+                    color = if (isFree) StoreStyle.accent(Store.EPIC) else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

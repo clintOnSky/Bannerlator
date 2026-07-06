@@ -51,33 +51,47 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.2.2** — built from Star **marcescence** (`versionName 2.2.2`, `versionCode 37`) |
+| **Version** | Bannerlator **V 2.3** — built from Star **marcescence** (`versionName 2.3`, `versionCode 38`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
 ---
 
-## 🆕 What's New in 2.2.2
+## 🆕 What's New in 2.3
 
-2.2.2 brings the big one: **in-game ReShade effects** — real ReShade `.fx` post-processing you configure **per game**, toggle and tune **live**, and **stack**. It also lands a batch of fixes from GitHub and Discord reports: the **FPS limiter no longer resets** between sessions, on-screen controls honour a **white** colour, **container creation** can no longer get stuck, and very light / dark custom accents stay readable. This is an **app-side** update — **no ImageFS reinstall** — and existing containers **refresh their ReShade layer automatically** on next launch.
+2.3 is the **storefronts** release. Bannerlator gains a full **built-in Steam store** — sign in with **username/password or QR code**, browse your owned library, and **download + install** your games through a native depot engine — plus new **Epic Games** and **Amazon Games** stores, with the existing **GOG** store folded into a new **cross-store Download Manager**. One ⬇ manager shows every active download and your whole installed library across **all four stores**, with **background downloads** that survive leaving the app and appear in your **notification shade**. For offline / emulated play there's an optional **Goldberg auto-patch** for Steam games, a **4-tier download-speed** picker, and this release **hardens store logs** so credentials and tokens are scrubbed from anything you might share. It's an **app-side** update — **no ImageFS reinstall** — your containers, themes and settings carry over untouched.
 
-**🎬 In-game ReShade effects — new.** Run real ReShade `.fx` effects (colour grading, sharpen, film grain, CRT, tonemap, LUTs…) on **DXVK / VKD3D** games, compiled **on-device** via the bundled **[vkBasalt](https://github.com/DadSchoorse/vkBasalt)** layer:
+**🎮 Built-in Steam store — new.** Sign in to Steam (**username + password** *or* **QR code**), browse your owned library, and **download + install** games through a built-in **depot engine** (built on **[JavaSteam](https://github.com/Longi94/JavaSteam)**) straight into a container. Includes a **GameNative-style 4-tier download speed** (Slow / Medium / Fast / Blazing, cores × ratio), **session hardening** that recovers from Steam's ~1-hour connection-manager logoff so long installs survive, an in-header **connection / login status pill**, a **depot-download OOM fix**, and an optional per-download **"Log debug session"** toggle.
+
+**🕹️ Goldberg auto-patch — new.** On a Steam game's detail page, apply a **[Goldberg](https://mr_goldberg.gitlab.io/goldberg_emulator/) / gbe_fork** patch for **offline / emulated** play in three tiers — **Regular**, **Experimental**, **ColdClient** — installed automatically and cleanly reverted on switch-back. *(Modifies a game's shipped files to run offline/emulated — **use at your own risk**, for games you own.)*
+
+**⬇️ Cross-store Download Manager — new.** One unified **⬇ manager** across Steam, Epic, GOG and Amazon: see active downloads *and* your installed library in one place, with **live two-bar** download/install progress, **background downloads + shade notifications** (a foreground service keeps them running after you leave the app), **launch / verified uninstall**, a single **source-of-truth install state** across detail / card / list, and a new **"Default screen on launch"** setting.
+
+**🛍️ Epic, GOG & Amazon stores.** **Amazon Games** and **Epic Games** stores added — sign in, browse your library, and **download / install / launch** (including Epic **free games**) — and **GOG** wired into the Download Manager. All non-Steam store pages are **restyled to Material 3** to match the app theme and the Steam layout, with live download **%** on detail pages, cover art, launch fixes, a **themed container picker**, and **themed toasts** (fixing an unreadable black-box toast on some ROMs).
+
+**🔒 Security & your accounts.** The Steam / Epic / GOG / Amazon sign-ins are a **third-party login system, exactly like any other emulator or launcher** that logs into these stores — Bannerlator is **not affiliated with or endorsed by** Valve/Steam, Epic, GOG or Amazon, and you use them **at your own risk**. This release **redacts** credentials and identifiers from logs — signed download / manifest URLs, OAuth authorization codes, GOG `client_secret` + `refresh_token`, and account identity IDs are stripped from **logcat *and* the shareable diagnostic files** via a new `StoreLog.redactUrl` helper (Steam was already redacted). Even so, **be cautious about sharing any log or debug file publicly** — they can still contain other diagnostic detail. See the [Security Hardening](#-security-hardening--your-store-accounts) section below.
+
+**🔓 Steam QR sign-in re-enabled.** With the new logoff-recovery path in place, **QR login is back on** — a QR session stores the same credentials as a password login and recovers the same way. If downloads or the session keep dropping after a QR sign-in, sign out and use **username + password** (the more durable path).
+
+<details>
+<summary><b>Previously in 2.2.2</b> — the in-game ReShade release</summary>
+
+2.2.2 brought the big one: **in-game ReShade effects** — real ReShade `.fx` post-processing you configure **per game**, toggle and tune **live**, and **stack**. It also landed a batch of fixes from GitHub and Discord reports: the **FPS limiter no longer resets** between sessions, on-screen controls honour a **white** colour, **container creation** can no longer get stuck, and very light / dark custom accents stay readable. That was an **app-side** update with **no ImageFS reinstall** — existing containers **refreshed their ReShade layer automatically** on next launch.
+
+**🎬 In-game ReShade effects.** Run real ReShade `.fx` effects (colour grading, sharpen, film grain, CRT, tonemap, LUTs…) on **DXVK / VKD3D** games, compiled **on-device** via the bundled **[vkBasalt](https://github.com/DadSchoorse/vkBasalt)** layer:
 - **Per-game setup** — pick effects when editing a **container** or a **game shortcut**; your choices are saved with that game.
 - **On-demand catalog** of ~100 curated MIT / CC0 effects (search, browse, download only what you want) — or **drop your own** into the `ReShade/` folder (see [Adding your own ReShade effects](#-adding-your-own-reshade-effects)).
 - **Dedicated in-game ReShade tab** that auto-generates properly **typed controls** — sliders, toggles, dropdowns and colour pickers — read straight from each shader, with a **Reset-to-defaults** button. Toggle and tune effects **live**, no restart, and your changes **persist per game** across quit → relaunch.
 - **Solo or stack** — run a single effect or layer several at once.
 - > ⚠️ **Stacking multiple effects? Add them a few at a time.** Each ReShade effect compiles on-device and costs GPU, so **selecting too many at once can stop a game from starting** — you'll get a **flat / blank screen** instead of the game. If that happens, go back into the per-game **ReShade effect** settings and **uncheck the effects one at a time** (or the specific heavy one) until the game boots correctly, then add more gradually. *(Colour effects today; depth effects like SSAO / DOF aren't supported yet.)*
 
-**♻️ Existing containers auto-update the ReShade layer.** Updating from an earlier version? Your **existing containers pick up the new ReShade (vkBasalt) layer automatically** on next launch — no need to recreate a container or reinstall the ImageFS for ReShade to work.
+**♻️ Existing containers auto-update the ReShade layer** on next launch — no need to recreate a container or reinstall the ImageFS for ReShade to work.
 
-**🛟 In-game drawer rail now scrolls.** On shorter screens the left icon rail could push **Exit** off the bottom; the rail is now **scrollable**, so every control — including **Exit** — is always reachable.
+**🛟 In-game drawer rail now scrolls** so every control — including **Exit** — is always reachable on short screens.
 
-**🎛️ FPS limiter now sticks between sessions.** Toggling the in-game **FPS limiter** for a game launched from a shortcut is now **saved to that game** — it no longer reverts every time you close and reopen the game. *(GitHub #46.)*
+**🎛️ FPS limiter now sticks between sessions** for a game launched from a shortcut. *(GitHub #46.)*
 
-**🎨 Fixes.**
-- **White on-screen controls** — setting the virtual-control colour to **white** now stays white instead of falling back to blue. *(GitHub #46.)*
-- **Readable light / dark accents** — a very **light** custom theme accent no longer paints buttons white-on-white (and a very **dark** one no longer goes dark-on-dark); glyphs pick a contrasting colour automatically. **AMOLED and the built-in presets are unchanged.**
-- **Container creation could get stuck** — after deleting a container that still had a leftover shortcut, creating a new container could silently fail; the stale entry is now cleaned up and no longer blocks creation. *(GitHub #45.)*
+**🎨 Fixes** — **white on-screen controls** stay white *(GitHub #46)*; very **light / dark custom accents** stay readable (glyphs pick a contrasting colour, AMOLED and presets unchanged); and **container creation** can no longer get stuck on a leftover shortcut *(GitHub #45)*.
 
 <details>
 <summary><b>Previously in 2.2</b> — the themeable-interface overhaul</summary>
@@ -97,6 +111,8 @@
 **🧰 In-game Task Manager.** **"New Task" now works on the Vulkan / Native renderers** — the dialog used to be invisible over those surfaces — and running processes are shown as **cards**.
 
 **🧹 Consistency & readability.** The Games and Containers lists now share one card style with consistent depth on every theme, and legacy dropdowns, spinners, dialogs and section headers follow the accent too — with a luminance floor so text never goes dark-on-dark on a dark custom accent.
+
+</details>
 
 </details>
 
@@ -162,10 +178,21 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - **Customizable on-screen touch controls** and virtual gamepad overlays, which **follow your app theme** or take a **per-game custom colour** you set in the Controls editor.
 - **Physical controller** support (SDL2), plus touchpad / mouse emulation with adjustable cursor speed. The **external controller-binding screen** lists each input as a card with readable labels, and buttons you press while binding appear instantly.
 
-### 🛒 Built-in GOG store
-- **Sign in with your [GOG](https://www.gog.com/) account** and browse your owned library directly in-app.
-- **Download and install** your GOG games, with **cloud-save** sync and one-tap launch into a container.
-- DRM-free titles only — Bannerlator does not bundle or circumvent any DRM; you install games you already own.
+### 🛒 Built-in stores & cross-store Download Manager
+Sign in to your existing storefronts and play from libraries **you already own** — Bannerlator does not sell, bundle or circumvent any game or DRM.
+- **Steam** — sign in with **username / password or QR code**, browse your owned library, and **download + install** games through a built-in **depot engine** (built on **[JavaSteam](https://github.com/Longi94/JavaSteam)**). Includes a **4-tier download-speed** picker (Slow / Medium / Fast / Blazing), **session hardening** that recovers from Steam's ~1-hour connection-manager logoff so long installs finish, a **connection / login status pill**, and a depot-download **OOM fix**.
+  - **Optional Goldberg auto-patch** on a game's detail page — a **[Goldberg](https://mr_goldberg.gitlab.io/goldberg_emulator/) / gbe_fork** Steam-emulator patch for **offline / emulated** play, in **Regular / Experimental / ColdClient** tiers, installed automatically and cleanly reverted on switch-back. *(Modifies a game's shipped files — **use at your own risk**, for games you own.)*
+- **Epic Games** — sign in, browse your library, and **download / install / launch** your titles (including Epic **free games**).
+- **Amazon Games** — sign in, browse your library, and **download / install / launch** your titles.
+- **[GOG](https://www.gog.com/)** — sign in and browse your owned library; **download and install** your **DRM-free** games with **cloud-save** sync and one-tap launch into a container.
+- **⬇ Cross-store Download Manager** — one unified manager across **all four stores**: see every active download and your whole installed library in one place, with **live two-bar** download/install progress, **background downloads + notification-shade** support (a foreground service keeps them running when you leave the app), and **launch / verified uninstall** for any installed game. Install state, cover art and update-available status stay in sync across a game's detail page, its download card and the store list.
+- > 🔒 These sign-ins are a **third-party login system, exactly like any other emulator/launcher** that logs into these stores — **use them at your own risk** (see [Security Hardening](#-security-hardening--your-store-accounts)).
+
+### 🔒 Security Hardening & your store accounts
+The Steam / Epic / GOG / Amazon sign-ins are a **third-party login system, exactly like any other emulator or launcher** that logs into these stores. **Bannerlator is not affiliated with, authorised by, or endorsed by Valve/Steam, Epic Games, GOG, or Amazon.**
+- **Use at your own risk.** You are logging your **real store account** into a community app. That's a normal trade-off for this kind of tool — but it's your account and your call.
+- **Your credentials are redacted from logs.** This release strips sensitive values out of everything the stores write, to **logcat *and* the shareable diagnostic files**, via a new `StoreLog.redactUrl` helper: **signed download / manifest URLs** (Amazon / Epic / GOG CDN links carry access tokens in the query), **OAuth authorization codes**, **GOG `client_secret` + `refresh_token`**, and **account identity IDs** (Epic account ID, GOG user ID). Steam credentials were already redacted. None of this changes how login, downloads or cloud saves work — only what gets written to a log.
+- **Still be careful sharing logs.** Even with redaction, a log or debug file can contain other diagnostic detail — so only share one publicly if you're comfortable doing so.
 
 ### 🧰 Bundled Start-menu utilities
 - New containers ship with handy Windows tools in the Start menu — **Winlator File Manager (WFM)**, **AIO Graphics Test**, and **Game Controller Test**.
@@ -322,13 +349,16 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **isygold** (AGBOOLA Israel Oluwagbogo) | [Star Engine / VEGAS](https://github.com/isygold/vegas-releases) — the Adreno-optimized DXVK fork this build's `v1.3-vegas` is named for, eliminating stutter and adding real-time upscaling on mobile GPUs, plus tuned [dxvk.conf profiles](https://github.com/isygold/DXVK.CONF-FILE-SETTINGS-). See the **[VEGAS DXVK FAQ](https://htmlpreview.github.io/?https://github.com/The412Banner/Bannerlator/blob/main/docs/vegas_faq.html)** for help & configuration.<br>🚀 **Support VEGAS Development** — low-level graphics dev & vibecoder: debugging, refactoring & improving original DXVK code for Adreno. **[❤️ Sponsor →](https://github.com/sponsors/isygold)** |
 | **vivsi** | Controller support contributions. |
 | **StevenMXZ** | [Winlator-Ludashi](https://github.com/StevenMXZ/Winlator-Ludashi) and extensive cherry-picked work implemented in this build. This includes the **new user interface** and the **Vulkan rendering** path — both of which were **still unreleased and unfinished at the time these builds and this repo were created** — along with various other cherry-picked commits. This work is set to be released properly in his upcoming **3.1**. The bundled **Winlator File Manager (`wfm.exe`)** — including its correct "Local Disk" drive-icon behaviour — is from StevenMXZ's **Winlator-Ludashi 3.1 hotfix** release. |
-| **GameNative** | [GameNative](https://github.com/utkarshdalal/GameNative) by **utkarshdalal** — Proton bionic translation layers and cherry-picked commits adapted into this build. Its rendering pipeline was also the **reference used to fix and rewire Bannerlator's render options** — the `AHardwareBuffer` present path that makes Vulkan / DXVK / VKD3D content render correctly on both the OpenGL and Vulkan host renderers (GPUImage socket-buffer locking + EGLImage sampling, DRI3 direct-scanout, the Present extension's FLIP / COPY branches, and the Native Rendering+ direct-scanout path) was ported from and cross-examined against GameNative's implementation. The **standalone FPS limiter** is GameNative's too — its guest-side present-pacing mechanism (delaying the X11 Present `IdleNotify` to throttle the game itself, plus the rule that lsfg-vk's own pacing governs when its multiplier is ≥ 2) was ported from GameNative. |
+| **GameNative** | [GameNative](https://github.com/utkarshdalal/GameNative) by **utkarshdalal** — Proton bionic translation layers and cherry-picked commits adapted into this build. Its rendering pipeline was also the **reference used to fix and rewire Bannerlator's render options** — the `AHardwareBuffer` present path that makes Vulkan / DXVK / VKD3D content render correctly on both the OpenGL and Vulkan host renderers (GPUImage socket-buffer locking + EGLImage sampling, DRI3 direct-scanout, the Present extension's FLIP / COPY branches, and the Native Rendering+ direct-scanout path) was ported from and cross-examined against GameNative's implementation. The **standalone FPS limiter** is GameNative's too — its guest-side present-pacing mechanism (delaying the X11 Present `IdleNotify` to throttle the game itself, plus the rule that lsfg-vk's own pacing governs when its multiplier is ≥ 2) was ported from GameNative. For the **Steam store** (2.3), the **session-hardening patterns** (derived-`loggedIn` state, off-pump PICS sync, single reconnect funnel, dead-token clearing, keep-alive / watchdog) and the **`DownloadSpeedConfig` cores × ratio 4-tier download-speed model** were also ported / adapted from GameNative. |
 | **xXJSONDeruloXx** | [bionic-fg](https://github.com/xXJSONDeruloXx/bionic-fg) — the Android/bionic Vulkan **frame-generation** layer powering Bannerlator's Frame Generation feature. Included in-tree as a git submodule with the author's permission. |
 | **PancakeTAS** | [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk) — the open-source Vulkan frame-generation layer (a Vulkan-layer reimplementation of Lossless Scaling's frame generation) that Bannerlator's **second, user-selectable FG engine** is built on. |
 | **FrankBarretta** | [lsfg-vk-android](https://github.com/FrankBarretta/lsfg-vk-android) — the Android/bionic port of lsfg-vk (AHardwareBuffer path + `vkCmdPipelineBarrier2` shim) that runs as Bannerlator's lsfg-vk engine on the Turnip stack. The in-game live multiplier/flow-scale reload uses the `conf.toml` mtime-watch mechanism from **GameNative's** [lsfg-vk-android fork](https://github.com/GameNative). No proprietary shaders are bundled — users supply their own `Lossless.dll` ([Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/) by THS) via the in-app picker. |
 | **DadSchoorse** | [vkBasalt](https://github.com/DadSchoorse/vkBasalt) (zlib) — the Vulkan post-processing layer that embeds the ReShade FX compiler. Bannerlator's **ReShade** feature is a continuation of this work: the bundled layer is built from DadSchoorse's source, patched for live on-device toggle and slider control. The bundled / catalog `.fx` effects are MIT / CC0 shaders by the **ReShade ([crosire](https://github.com/crosire/reshade-shaders))**, **prod80 ([prod80-reshade-repository](https://github.com/prod80/prod80-reshade-repository))**, **luluco250 ([FXShaders](https://github.com/luluco250/FXShaders))** and **fubax** authors, each under their own MIT / CC0 license. |
 | **leegao** (Lee Gao) | Vulkan texture-compression work used for mobile-GPU compatibility and performance — the [BCn decompression layer](https://github.com/leegao/bcn_layer) and real-time [ASTC/ETC compute-shader encoders](https://github.com/leegao). |
-| **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
+| **JavaSteam** | [JavaSteam](https://github.com/Longi94/JavaSteam) (`in.dragonbra:javasteam`) by **Longi94** — the Steam **connection-manager client** the built-in Steam store logs in and talks to Steam with, and — via the **`javasteam-depotdownloader`** fork by **joshuatam** — the **entire depot-download engine** Bannerlator's Steam store is built on. |
+| **Goldberg Steam Emu / gbe_fork** | [Goldberg Steam Emu](https://mr_goldberg.gitlab.io/goldberg_emulator/) by **Mr_Goldberg**, and **gbe_fork** by **[Detanup01](https://github.com/Detanup01/gbe_fork)** — the Steam emulator Bannerlator's **Goldberg auto-patch** installs (Regular / Experimental / ColdClient tiers) for offline / emulated play of games you own. |
+| **Pluvia** | [Pluvia](https://github.com/oxters168/Pluvia) — an Android Steam client whose patterns were **referenced alongside GameNative** while building the Steam store's login / session handling. |
+| **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. **In 2.3**, building on JavaSteam / GameNative / Goldberg, the original engineering is Bannerlator's own: the **cross-store Download Manager**, the **four storefront integrations** (Steam / Epic / GOG / Amazon), the multi-week **Steam session-hardening** work, the depot **OOM fix**, the **Goldberg auto-patch** integration, the store **Material-3 restyle**, and the store-log **credential redaction** (`StoreLog.redactUrl`). Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
 
 ### Upstream stack
 
@@ -346,6 +376,8 @@ The Wine/translation stack this app bundles or downloads:
 | **VKD3D-Proton** | [Hans-Kristian Arntzen](https://github.com/HansKristian-Work) |
 | **Turnip / Mesa** | [Freedreno team @ Mesa](https://gitlab.freedesktop.org/mesa/mesa) |
 | **Proton layers (bionic)** | [GameNative](https://github.com/utkarshdalal/GameNative) |
+| **Steam depot engine** | [JavaSteam](https://github.com/Longi94/JavaSteam) by [Longi94](https://github.com/Longi94) · depotdownloader fork [joshuatam](https://github.com/joshuatam) |
+| **Steam emulator (Goldberg auto-patch)** | [Goldberg Steam Emu](https://mr_goldberg.gitlab.io/goldberg_emulator/) (Mr_Goldberg) · [gbe_fork](https://github.com/Detanup01/gbe_fork) (Detanup01) |
 | **Frame Generation (bionic-fg)** | [xXJSONDeruloXx](https://github.com/xXJSONDeruloXx/bionic-fg) |
 | **Frame Generation (lsfg-vk)** | [PancakeTAS](https://github.com/PancakeTAS/lsfg-vk) · Android port [FrankBarretta](https://github.com/FrankBarretta/lsfg-vk-android) · live-reload fork [GameNative](https://github.com/utkarshdalal/GameNative) · DLL [Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/) (user-supplied) |
 | **Post-processing (ReShade / vkBasalt)** | [vkBasalt](https://github.com/DadSchoorse/vkBasalt) by [DadSchoorse](https://github.com/DadSchoorse) (zlib) · Winlator packaging [Pipetto-crypto](https://github.com/Pipetto-crypto/winlator) · effects by [crosire](https://github.com/crosire/reshade-shaders) · [prod80](https://github.com/prod80/prod80-reshade-repository) · [luluco250](https://github.com/luluco250/FXShaders) · fubax (MIT / CC0) |
@@ -361,7 +393,7 @@ Additional credits surfaced in the **Star Bionic REVAMPED** project (`star.bioni
 
 ## ⚖️ Disclaimer
 
-Winlator and its forks are unofficial community projects. They are **not** affiliated with or endorsed by Microsoft, Wine, the Mesa project, Qualcomm, or any game publisher. Compatibility varies by device GPU, Android version, and individual game.
+Winlator and its forks are unofficial community projects. They are **not** affiliated with or endorsed by Microsoft, Wine, the Mesa project, Qualcomm, **Valve/Steam, Epic Games, GOG, Amazon**, or any game publisher. The built-in store sign-ins are a third-party login system for libraries **you already own** — see [Security Hardening & your store accounts](#-security-hardening--your-store-accounts), and **use them at your own risk**. Compatibility varies by device GPU, Android version, and individual game.
 
 ---
 

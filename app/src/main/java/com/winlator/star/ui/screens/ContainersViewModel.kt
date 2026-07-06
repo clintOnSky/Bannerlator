@@ -6,6 +6,7 @@ import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
 import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
+import com.winlator.star.container.Shortcut
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
@@ -78,6 +79,10 @@ class ContainersViewModel(app: Application) : AndroidViewModel(app) {
         )
         return backupDir.listFiles { f -> f.isDirectory }?.toList() ?: emptyList()
     }
+
+    /** Installed games (shortcuts) belonging to [container] — the source for the per-game backup picker. */
+    fun shortcutsFor(container: Container): List<Shortcut> =
+        manager.loadShortcuts().filter { it.container.id == container.id }
 
     fun remove(container: Container, context: Context, onDone: () -> Unit) {
         // Disable any home-screen shortcuts pinned for this container before removing it

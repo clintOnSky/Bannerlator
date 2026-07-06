@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,6 +35,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -60,6 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -81,6 +85,9 @@ class AmazonGamesActivity : ComponentActivity() {
     private var statusText by mutableStateOf("Loading Amazon library\u2026")
     private var gamesVisible by mutableStateOf(false)
     private var expandedProductId by mutableStateOf<String?>(null)
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse Steam's UninstallResultBar for readable uninstall feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
     private var refreshEnabled by mutableStateOf(true)
 
     // Download progress per game
@@ -106,6 +113,12 @@ class AmazonGamesActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences(PREFS_NAME, 0)
         viewMode = prefs!!.getString(VIEW_MODE_KEY, "grid") ?: "grid"
+
+        // Cross-store Download Manager (Phase A): init the registry + seed the installed
+        // Amazon library here too, so an INSTALLED library is present even if the user opens
+        // the Amazon list without ever touching Steam. Idempotent.
+        DownloadRegistry.init(this)
+        AmazonLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -173,6 +186,7 @@ class AmazonGamesActivity : ComponentActivity() {
                         },
                     )
                 }
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
 
@@ -220,11 +234,7 @@ class AmazonGamesActivity : ComponentActivity() {
                 setSync("Not logged in", true)
                 enableRefresh()
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Please log in to Amazon Games first",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "Please log in to Amazon Games first"
                     finish()
                 }
                 return
@@ -418,11 +428,7 @@ class AmazonGamesActivity : ComponentActivity() {
             val token = AmazonCredentialStore.getValidAccessToken(this@AmazonGamesActivity)
             if (token == null) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Login required",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "Login required"
                 }
                 removeDownloadState(game.productId)
                 return@launch
@@ -437,29 +443,47 @@ class AmazonGamesActivity : ComponentActivity() {
                 installDir.absolutePath,
             ).apply()
 
+            // Publish this list-flow download into the cross-store Download Manager registry \u2014
+            // same shim + same key as the detail screen, so a live DOWNLOADING row shows here too
+            // and doesn't double-list against the later seeded Library row. One honest install bar.
+            StoreDownloadHooks.registerDownload(
+                store = Store.AMAZON,
+                id = game.productId,
+                name = game.title,
+                cover = game.artUrl,
+                supportsPause = false,
+                installTotal = prefs!!.getLong("amazon_size_${game.productId}", 0L),
+                cancel = { cancelled.set(true) },
+            )
+
             val ok = AmazonDownloadManager.install(
                 this@AmazonGamesActivity, game, token, installDir,
                 { dl, total, file ->
                     if (cancelled.get()) return@install
                     val pct = if (total > 0) (dl * 100L / total).toInt() else 0
                     val name = if (!file.isNullOrEmpty()) file else "Downloading\u2026"
+                    StoreDownloadHooks.tick(
+                        store = Store.AMAZON,
+                        id = game.productId,
+                        pct = pct,
+                        installDone = dl,
+                        installTotal = total,
+                    )
                     updateDownloadState(game.productId, pct, name)
                 },
                 { cancelled.get() },
             )
 
             if (cancelled.get()) {
+                StoreDownloadHooks.markCancelled(Store.AMAZON, game.productId)
                 removeDownloadState(game.productId)
                 return@launch
             }
             if (!ok) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Error: Download failed",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    resultBarMsg = "Error: Download failed"
                 }
+                StoreDownloadHooks.markFailed(Store.AMAZON, game.productId, "Download failed")
                 removeDownloadState(game.productId)
                 return@launch
             }
@@ -469,12 +493,9 @@ class AmazonGamesActivity : ComponentActivity() {
 
             if (exeFiles.isEmpty()) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Error: No executable found after install",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    resultBarMsg = "Error: No executable found after install"
                 }
+                StoreDownloadHooks.markFailed(Store.AMAZON, game.productId, "No executable found")
                 removeDownloadState(game.productId)
                 return@launch
             }
@@ -485,25 +506,14 @@ class AmazonGamesActivity : ComponentActivity() {
                     AmazonLaunchHelper.scoreExe(a, lowerTitle)
             }
 
-            if (exeFiles.size == 1) {
-                val path = exeFiles[0].absolutePath
-                prefs!!.edit().putString("amazon_exe_${game.productId}", path).apply()
-                onDownloadComplete(game.productId, path)
-                return@launch
-            }
-
-            val candidates = exeFiles.map { it.absolutePath }
-            withContext(Dispatchers.Main) {
-                exePickerData = ExePickerData(
-                    candidates = candidates,
-                    onSelected = { selected ->
-                        val chosen = if (!selected.isNullOrEmpty()) selected
-                        else exeFiles[0].absolutePath
-                        prefs!!.edit().putString("amazon_exe_${game.productId}", chosen).apply()
-                        onDownloadComplete(game.productId, chosen)
-                    },
-                )
-            }
+            // Completion NEVER shows a picker: auto-record the best-scored exe (list already
+            // sorted best-first) and finalize, regardless of exe count. This finalizes the install
+            // even when this screen isn't foreground (a queued dialog on a stopped Activity used to
+            // wedge the DL-manager card at 100%). Exe choice, if there are several, happens at
+            // Launch instead (detail page's onLaunchClicked / a Launch-time picker).
+            val path = exeFiles[0].absolutePath
+            prefs!!.edit().putString("amazon_exe_${game.productId}", path).apply()
+            onDownloadComplete(game.productId, path)
         }
     }
 
@@ -517,6 +527,15 @@ class AmazonGamesActivity : ComponentActivity() {
             )
         }
         prefs!!.edit().putString("amazon_exe_$productId", exePath).apply()
+        // Terminal success → INSTALLED (persisted to the durable library).
+        prefs!!.getString("amazon_dir_$productId", null)?.let { dir ->
+            StoreDownloadHooks.markInstalled(
+                store = Store.AMAZON,
+                id = productId,
+                installPath = dir,
+                bytes = prefs!!.getLong("amazon_size_$productId", 0L),
+            )
+        }
         refreshFromCache()
     }
 
@@ -541,17 +560,15 @@ class AmazonGamesActivity : ComponentActivity() {
         if (installedDir == null) return
         lifecycleScope.launch(Dispatchers.IO) {
             deleteDir(File(installedDir))
-            prefs!!.edit()
-                .remove("amazon_exe_${game.productId}")
-                .remove("amazon_dir_${game.productId}")
-                .apply()
+            // Purge the FULL native install record via the canonical helper, and clear the DL
+            // manager's registry/library row — so uninstalling from the list keeps the detail
+            // page and the cross-store Download Manager in sync (previously it left the DL card
+            // and stale manifest/size prefs behind).
+            AmazonInstallState.purge(applicationContext, game.productId)
+            StoreDownloadHooks.markUninstalled(Store.AMAZON, game.productId)
             withContext(Dispatchers.Main) {
                 refreshFromCache()
-                Toast.makeText(
-                    this@AmazonGamesActivity,
-                    "${game.title} uninstalled",
-                    Toast.LENGTH_SHORT,
-                ).show()
+                resultBarMsg = "${game.title} uninstalled"
             }
         }
     }
@@ -561,18 +578,14 @@ class AmazonGamesActivity : ComponentActivity() {
     private fun openExePicker(game: AmazonGame) {
         val installedDir = prefs!!.getString("amazon_dir_${game.productId}", null)
         if (installedDir == null) {
-            Toast.makeText(this, "Install directory not found", Toast.LENGTH_SHORT).show()
+            resultBarMsg = "Install directory not found"
             return
         }
         lifecycleScope.launch(Dispatchers.IO) {
             val dir = File(installedDir)
             if (!dir.isDirectory) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Install directory not found",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "Install directory not found"
                 }
                 return@launch
             }
@@ -580,11 +593,7 @@ class AmazonGamesActivity : ComponentActivity() {
             AmazonLaunchHelper.collectExe(dir, exeFiles)
             if (exeFiles.isEmpty()) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "No .exe files found",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "No .exe files found"
                 }
                 return@launch
             }
@@ -598,11 +607,7 @@ class AmazonGamesActivity : ComponentActivity() {
                                 .putString("amazon_exe_${game.productId}", selected)
                                 .apply()
                             refreshFromCache()
-                            Toast.makeText(
-                                this@AmazonGamesActivity,
-                                "Exe set: ${File(selected).name}",
-                                Toast.LENGTH_SHORT,
-                            ).show()
+                            resultBarMsg = "Exe set: ${File(selected).name}"
                         }
                     },
                 )
@@ -700,13 +705,6 @@ class AmazonGamesActivity : ComponentActivity() {
         private const val CACHE_KEY = "amazon_library_cache"
         private const val VIEW_MODE_KEY = "amazon_view_mode"
 
-        val COLOR_ACCENT = 0xFF0055FF.toInt()
-        val COLOR_ADD = 0xFF0055FF.toInt()
-        val COLOR_CANCEL = 0xFFCC3333.toInt()
-        val COLOR_CARD_BG = 0xFF000000.toInt()
-        val COLOR_HDR_BG = 0xFF000000.toInt()
-        val COLOR_ROOT_BG = 0xFF000000.toInt()
-
         fun viewModeIcon(mode: String): String = when (mode) {
             "grid" -> "\u25A6"
             "poster" -> "\u2630"
@@ -775,41 +773,41 @@ private fun AmazonGamesScreen(
         else games.filter { it.title.contains(searchQuery, ignoreCase = true) }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(AmazonGamesActivity.COLOR_ROOT_BG))) {
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(AmazonGamesActivity.COLOR_HDR_BG))
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
                 onClick = onBack,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            ) { Text("\u2190", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u2190", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
 
             Text(
                 text = "Amazon Games",
                 fontSize = 18.sp,
-                color = Color(AmazonGamesActivity.COLOR_ACCENT),
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f).padding(start = 12.dp),
             )
 
             Button(
                 onClick = onViewModeToggle,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             ) {
                 Text(
                     text = AmazonGamesActivity.viewModeIcon(viewMode),
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     fontSize = 16.sp,
                 )
             }
@@ -820,31 +818,35 @@ private fun AmazonGamesScreen(
                 onClick = onRefresh,
                 enabled = refreshEnabled,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (refreshEnabled) Color(0xFF0055FF) else Color(0xFF555555),
+                    containerColor = if (refreshEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 ),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            ) { Text("\u21BA", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u21BA", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
+
+            // \u2B07 cross-store Download Manager (global active-count badge), trailing the
+            // header actions like Steam's list header.
+            DownloadsButton()
         }
 
         // Search bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
-            placeholder = { Text("Search games\u2026", color = Color(0xFF666666)) },
+            placeholder = { Text("Search games\u2026", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(0.dp),
             textStyle = androidx.compose.ui.text.TextStyle(
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp,
             ),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF0055FF),
-                unfocusedBorderColor = Color(0xFF333333),
-                cursorColor = Color(0xFF0055FF),
-                focusedContainerColor = Color.Black,
-                unfocusedContainerColor = Color.Black,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                cursorColor = MaterialTheme.colorScheme.primary,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
             ),
         )
 
@@ -852,10 +854,10 @@ private fun AmazonGamesScreen(
         val statusColor = when {
             statusText.startsWith("Error") || statusText.startsWith("Not logged in")
                 || statusText.startsWith("Token refresh") || statusText.startsWith("No games") ->
-                Color(0xFFFF6B6B)
+                MaterialTheme.colorScheme.error
             statusText.contains("game") && (statusText.contains("tap") || statusText.contains("cached")) ->
-                Color(0xFF81C784)
-            else -> Color(0xFFCCCCCC)
+                Color(0xFF81C784) // semantic "library ready" green
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
         Text(
             text = statusText,
@@ -863,7 +865,7 @@ private fun AmazonGamesScreen(
             color = statusColor,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -914,7 +916,7 @@ private fun AmazonGamesScreen(
                     text = if (statusText.contains("Error") || statusText.contains("No games"))
                         statusText else "Loading\u2026",
                     fontSize = 14.sp,
-                    color = Color(0xFF666666),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center).padding(24.dp),
                 )
             }
@@ -978,7 +980,7 @@ private fun GameCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(AmazonGamesActivity.COLOR_CARD_BG), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
             .clickable(onClick = onCardClick)
             .padding(10.dp),
     ) {
@@ -995,7 +997,7 @@ private fun GameCard(
                 contentDescription = null,
                 modifier = Modifier
                     .size(width = 60.dp, height = 60.dp)
-                    .background(Color.Black, RoundedCornerShape(8.dp)),
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop,
             )
 
@@ -1006,7 +1008,7 @@ private fun GameCard(
                     Text(
                         text = game.title,
                         fontSize = 15.sp,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1016,7 +1018,7 @@ private fun GameCard(
                         Text(
                             text = " \u2713",
                             fontSize = 14.sp,
-                            color = Color(0xFF4CAF50),
+                            color = Color(0xFF4CAF50), // semantic installed-green
                             fontWeight = FontWeight.Bold,
                         )
                     }
@@ -1031,7 +1033,7 @@ private fun GameCard(
                     Text(
                         text = sub,
                         fontSize = 11.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1041,7 +1043,7 @@ private fun GameCard(
             Text(
                 text = if (isExpanded) "\u25B2" else "\u25BC",
                 fontSize = 14.sp,
-                color = Color(0xFF888888),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable(onClick = onArrowClick).padding(8.dp, 0.dp, 0.dp, 0.dp),
             )
         }
@@ -1059,13 +1061,14 @@ private fun GameCard(
                 Text(
                     text = meta,
                     fontSize = 11.sp,
-                    color = Color(0xFF888888),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
 
             val checkText = if (updateAvailable) "\u2713 Installed \u2014 Update Available"
             else "\u2713 Installed"
+            // semantic: amber = update-available, installed-green = up to date
             val checkColor = if (updateAvailable) Color(0xFFFFAA00) else Color(0xFF4CAF50)
             if (isInstalled) {
                 Text(
@@ -1085,14 +1088,14 @@ private fun GameCard(
                         .fillMaxWidth()
                         .height(6.dp)
                         .padding(top = 6.dp),
-                    color = Color(AmazonGamesActivity.COLOR_ACCENT),
-                    trackColor = Color(0xFF333333),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
                 if (!ds.isComplete) {
                     Text(
                         text = "${ds.progress}%",
                         fontSize = 12.sp,
-                        color = Color(AmazonGamesActivity.COLOR_ACCENT),
+                        color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -1100,14 +1103,14 @@ private fun GameCard(
                     Text(
                         text = "Cancelling\u2026",
                         fontSize = 11.sp,
-                        color = Color(0xFFAAAAAA),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 } else {
                     Text(
                         text = ds.statusText,
                         fontSize = 11.sp,
-                        color = Color(0xFFAAAAAA),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -1115,6 +1118,7 @@ private fun GameCard(
 
             Spacer(Modifier.height(8.dp))
 
+            val isCancelBtn = ds != null && ds.isVisible
             Button(
                 onClick = {
                     if (ds != null && ds.isVisible) {
@@ -1126,11 +1130,8 @@ private fun GameCard(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = when {
-                        ds != null && ds.isVisible -> Color(AmazonGamesActivity.COLOR_CANCEL)
-                        isInstalled -> Color(AmazonGamesActivity.COLOR_ADD)
-                        else -> Color(AmazonGamesActivity.COLOR_ACCENT)
-                    },
+                    containerColor = if (isCancelBtn) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary,
                 ),
                 modifier = Modifier.fillMaxWidth().height(40.dp),
                 shape = RoundedCornerShape(8.dp),
@@ -1141,7 +1142,8 @@ private fun GameCard(
                         isInstalled -> "Add to Launcher"
                         else -> "Install"
                     },
-                    color = Color.White,
+                    color = if (isCancelBtn) MaterialTheme.colorScheme.onError
+                    else MaterialTheme.colorScheme.onPrimary,
                     fontSize = 13.sp,
                 )
             }
@@ -1208,8 +1210,8 @@ private fun GameGridTile(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black)
-            .border(1.dp, Color(0xFF0055FF).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = onToggleExpansion,
                 onLongClick = onLongPress,
@@ -1258,7 +1260,7 @@ private fun GameGridTile(
                     Text(
                         text = " \u2713",
                         fontSize = 11.sp,
-                        color = Color(0xFF66BB6A),
+                        color = Color(0xFF66BB6A), // semantic installed-green
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -1267,10 +1269,11 @@ private fun GameGridTile(
 
         // Action row (shown on tap)
         if (isExpanded) {
+            val isCancelBtn = downloadState != null && downloadState.isVisible
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0D0D0D))
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 val ds = downloadState
@@ -1278,8 +1281,8 @@ private fun GameGridTile(
                     LinearProgressIndicator(
                         progress = { ds.progress / 100f },
                         modifier = Modifier.fillMaxWidth().height(3.dp),
-                        color = Color(AmazonGamesActivity.COLOR_ACCENT),
-                        trackColor = Color(0xFF333333),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     )
                 }
 
@@ -1290,11 +1293,8 @@ private fun GameGridTile(
                         else onInstallOrLaunch()
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = when {
-                            ds != null && ds.isVisible -> Color(AmazonGamesActivity.COLOR_CANCEL)
-                            isInstalled -> Color(AmazonGamesActivity.COLOR_ADD)
-                            else -> Color(AmazonGamesActivity.COLOR_ACCENT)
-                        },
+                        containerColor = if (isCancelBtn) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
                     ),
                     modifier = Modifier.fillMaxWidth().height(32.dp),
                     shape = RoundedCornerShape(8.dp),
@@ -1306,7 +1306,8 @@ private fun GameGridTile(
                             isInstalled -> "Add to Launcher"
                             else -> "Install"
                         },
-                        color = Color.White,
+                        color = if (isCancelBtn) MaterialTheme.colorScheme.onError
+                        else MaterialTheme.colorScheme.onPrimary,
                         fontSize = 11.sp,
                     )
                 }
@@ -1364,13 +1365,13 @@ private fun InstallConfirmDialog(
                 Text(
                     text = sizeLabel,
                     fontSize = 14.sp,
-                    color = Color(0xFFCCCCCC),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = "Available storage:  ${AmazonGamesActivity.formatBytes(freeBytes)}",
                     fontSize = 14.sp,
-                    color = Color(0xFF88CC88),
+                    color = Color(0xFF88CC88), // semantic storage-ok green
                 )
             }
         },
@@ -1410,20 +1411,20 @@ private fun GameDetailDialog(
                 Text(
                     text = msg,
                     fontSize = 14.sp,
-                    color = Color(0xFFCCCCCC),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (installedExe != null) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = "\n.exe: ${File(installedExe).name}",
                         fontSize = 12.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = onSetExe,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF444444)),
-                    ) { Text("Set .exe\u2026", color = Color.White) }
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    ) { Text("Set .exe\u2026", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
         },

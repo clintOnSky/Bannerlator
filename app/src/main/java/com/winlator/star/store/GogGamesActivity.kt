@@ -3,7 +3,6 @@ package com.winlator.star.store
 import android.content.Intent
 import android.os.Bundle
 import android.os.StatFs
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -37,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -54,12 +54,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.ui.theme.WinlatorTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -135,6 +140,10 @@ class GogGamesActivity : ComponentActivity() {
     private var showExePicker by mutableStateOf<ExePickerDataGog?>(null)
     private var showInstallDialog by mutableStateOf<InstallDialogData?>(null)
     private var showDetailDialog by mutableStateOf<DetailDialogData?>(null)
+
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse the shared UninstallResultBar for readable feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
     private val downloadStates = mutableStateMapOf<String, GameDownloadState>()
 
     private val detailLauncher = registerForActivityResult(
@@ -149,6 +158,11 @@ class GogGamesActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("bh_gog_prefs", 0)
         viewMode = prefs.getString(VIEW_MODE_KEY, "grid") ?: "grid"
+
+        // Cross-store Download Manager (Phase B): init the registry + seed/self-heal the installed
+        // GOG library here (idempotent), mirroring AmazonGamesActivity.
+        DownloadRegistry.init(this)
+        GogLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -218,6 +232,7 @@ class GogGamesActivity : ComponentActivity() {
                         onCopyToDownloads = { data.onCopyToDownloads() },
                     )
                 }
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
 
@@ -534,8 +549,24 @@ class GogGamesActivity : ComponentActivity() {
         )
         downloadStates[game.gameId] = dlState
 
-        val cancelRunnable = GogDownloadManager.startDownload(this, game, object : GogDownloadManager.Callback {
+        // Publish into the cross-store Download Manager (shade notification + background survival).
+        // Single honest bar (pct only). Cancel routes to the Runnable stored in downloadStates
+        // (read lazily so it resolves once startDownload has returned it below).
+        StoreDownloadHooks.registerDownload(
+            store = Store.GOG,
+            id = game.gameId,
+            name = game.title,
+            cover = normalizeGogCover(game.imageUrl),
+            supportsPause = false,
+            installTotal = prefs.getLong("gog_size_${game.gameId}", 0L),
+            cancel = { downloadStates[game.gameId]?.cancelRunnable?.run() },
+        )
+
+        // applicationContext: the GOG engine keeps the Context for its whole background run; the
+        // list Activity must not be pinned/leaked. Registry hooks run on the engine callback thread.
+        val cancelRunnable = GogDownloadManager.startDownload(applicationContext, game, object : GogDownloadManager.Callback {
             override fun onProgress(msg: String, pct: Int) {
+                StoreDownloadHooks.tick(Store.GOG, game.gameId, pct)
                 runOnUiThread {
                     val existing = downloadStates[game.gameId] ?: return@runOnUiThread
                     downloadStates[game.gameId] = existing.copy(
@@ -545,6 +576,20 @@ class GogGamesActivity : ComponentActivity() {
                 }
             }
             override fun onComplete(exePath: String) {
+                // Finalize into the registry (engine already wrote gog_exe_/gog_dir_).
+                val exe = prefs.getString("gog_exe_${game.gameId}", null)
+                val dir = prefs.getString("gog_dir_${game.gameId}", null)
+                if (exe != null && dir != null) {
+                    val installAbs = GogInstallPath.getInstallDir(applicationContext, dir).absolutePath
+                    StoreDownloadHooks.markInstalled(
+                        store = Store.GOG,
+                        id = game.gameId,
+                        installPath = installAbs,
+                        bytes = prefs.getLong("gog_size_${game.gameId}", 0L),
+                    )
+                } else {
+                    StoreDownloadHooks.markFailed(Store.GOG, game.gameId, "No executable found")
+                }
                 runOnUiThread {
                     downloadStates[game.gameId] = GameDownloadState(
                         progress = 100,
@@ -558,29 +603,35 @@ class GogGamesActivity : ComponentActivity() {
                 }
             }
             override fun onError(msg: String) {
+                StoreDownloadHooks.markFailed(Store.GOG, game.gameId, msg)
                 runOnUiThread {
                     downloadStates.remove(game.gameId)
                     applyFilter(searchQuery)
-                    Toast.makeText(this@GogGamesActivity, "Error: $msg", Toast.LENGTH_LONG).show()
+                    resultBarMsg = "Error: $msg"
                 }
             }
             override fun onCancelled() {
+                StoreDownloadHooks.markCancelled(Store.GOG, game.gameId)
                 runOnUiThread {
                     downloadStates.remove(game.gameId)
                     applyFilter(searchQuery)
                 }
             }
             override fun onSelectExe(candidates: MutableList<String>?, onSelected: Consumer<String>?) {
-                runOnUiThread {
-                    if (candidates != null && onSelected != null) {
-                        showExePicker = ExePickerDataGog(candidates) { onSelected.accept(it) }
-                    }
-                }
+                // No completion dialog (would wedge the DL card at 100% off-screen): auto-pick the
+                // best (first) candidate. Exe choice stays available via the detail "Set .exe…".
+                if (onSelected != null) onSelected.accept(candidates?.firstOrNull() ?: "")
             }
         })
 
         val existing = downloadStates[game.gameId] ?: return
         downloadStates[game.gameId] = existing.copy(cancelRunnable = cancelRunnable)
+    }
+
+    /** `//host/img` → `https://host/img`; blank → null. Matches the detail page's normalization. */
+    private fun normalizeGogCover(url: String?): String? {
+        if (url.isNullOrEmpty()) return null
+        return if (url.startsWith("//")) "https:$url" else url
     }
 
     // ── Install confirmation dialog ──────────────────────────────────────────
@@ -635,7 +686,7 @@ class GogGamesActivity : ComponentActivity() {
                         val candidates = GogDownloadManager.collectExeCandidates(installPath)
                         if (candidates.isEmpty()) {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(this@GogGamesActivity, "No .exe files found in install directory", Toast.LENGTH_SHORT).show()
+                                resultBarMsg = "No .exe files found in install directory"
                             }
                             return@launch
                         }
@@ -643,7 +694,7 @@ class GogGamesActivity : ComponentActivity() {
                             showExePicker = ExePickerDataGog(candidates) { selected ->
                                 if (selected.isNotEmpty()) {
                                     prefs.edit().putString("gog_exe_${game.gameId}", selected).apply()
-                                    Toast.makeText(this@GogGamesActivity, "Exe set to: ${java.io.File(selected).name}", Toast.LENGTH_SHORT).show()
+                                    resultBarMsg = "Exe set to: ${java.io.File(selected).name}"
                                 }
                             }
                         }
@@ -655,25 +706,24 @@ class GogGamesActivity : ComponentActivity() {
                     lifecycleScope.launch(Dispatchers.IO) {
                         val installPath = GogInstallPath.getInstallDir(this@GogGamesActivity, dirName)
                         deleteDir(installPath)
-                        prefs.edit()
-                            .remove("gog_dir_${game.gameId}")
-                            .remove("gog_exe_${game.gameId}")
-                            .remove("gog_cover_${game.gameId}")
-                            .apply()
+                        // Purge the FULL native install record + clear the DL manager's row, so the
+                        // detail page and the cross-store Download Manager stay in sync. Mirrors Amazon.
+                        GogInstallState.purge(applicationContext, game.gameId)
+                        StoreDownloadHooks.markUninstalled(Store.GOG, game.gameId)
                         withContext(Dispatchers.Main) {
                             applyFilter(searchQuery)
-                            Toast.makeText(this@GogGamesActivity, "${game.title} uninstalled", Toast.LENGTH_SHORT).show()
+                            resultBarMsg = "${game.title} uninstalled"
                         }
                     }
                 }
             },
             onCopyToDownloads = {
-                Toast.makeText(this@GogGamesActivity, "Copying to Downloads\u2026", Toast.LENGTH_SHORT).show()
+                resultBarMsg = "Copying to Downloads\u2026"
                 lifecycleScope.launch(Dispatchers.IO) {
                     val dest = GogDownloadManager.copyToDownloads(this@GogGamesActivity, game.gameId)
                     withContext(Dispatchers.Main) {
-                        if (dest != null) Toast.makeText(this@GogGamesActivity, "Copied to: $dest", Toast.LENGTH_LONG).show()
-                        else Toast.makeText(this@GogGamesActivity, "Copy failed \u2014 check storage permission", Toast.LENGTH_SHORT).show()
+                        resultBarMsg = if (dest != null) "Copied to: $dest"
+                        else "Copy failed \u2014 check storage permission"
                     }
                 }
             },
@@ -746,33 +796,33 @@ private fun GogGamesScreen(
     onCancelClick: (GogGame) -> Unit,
     onAddToLauncher: (GogGame) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
                 onClick = onBack,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
-            ) { Text("\u2190", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u2190", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
             Spacer(Modifier.width(8.dp))
             Text(
                 "GOG Library",
                 fontSize = 18.sp,
-                color = Color(0xFF0055FF),
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
             Button(
                 onClick = onViewToggle,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
@@ -783,39 +833,41 @@ private fun GogGamesScreen(
                         "poster" -> "\u2630"
                         else -> "\u229E"
                     },
-                    color = Color.White, fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp,
                 )
             }
             Spacer(Modifier.width(4.dp))
             Button(
                 onClick = onRefresh,
                 enabled = !isSyncing,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
-            ) { Text("\u21ba", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u21ba", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
+            // \u2b07 cross-store Download Manager (global active-count badge).
+            DownloadsButton()
         }
 
         // Search bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
-            placeholder = { Text("Search games\u2026", color = Color(0xFF666666)) },
+            placeholder = { Text("Search games\u2026", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearchChange(searchQuery) }),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 0.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = Color(0xFF0055FF),
-                unfocusedBorderColor = Color(0xFF333333),
-                cursorColor = Color.White,
-                focusedContainerColor = Color.Black,
-                unfocusedContainerColor = Color.Black,
-                focusedPlaceholderColor = Color(0xFF666666),
-                unfocusedPlaceholderColor = Color(0xFF666666),
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                cursorColor = MaterialTheme.colorScheme.onSurface,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ),
         )
 
@@ -823,10 +875,10 @@ private fun GogGamesScreen(
         Text(
             text = syncText,
             fontSize = 13.sp,
-            color = Color(syncTextColor),
+            color = Color(syncTextColor), // semantic status colour (error red / ready green / neutral) set in setSync()
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -840,9 +892,17 @@ private fun GogGamesScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(games, key = { it.gameId }) { game ->
+                            // No live download this session → fall back to disk-truth so an
+                            // already-installed game shows Installed + "Add to Launcher" instead of
+                            // "Install" (mirrors EpicGamesActivity's `?: GameDownloadState(...)`).
+                            // buttonText MUST be set here: line ~1099 reads downloadState.buttonText
+                            // directly, so a bare default would render "Install" despite isInstalled.
+                            val context = LocalContext.current
                             val dlState = downloadStates[game.gameId]
+                                ?: if (GogInstallState.isInstalled(context, game.gameId))
+                                    GameDownloadState(isInstalled = true, buttonText = "Add to Launcher")
+                                else null
                             val isExpanded = expandedGameId == game.gameId
-                            val isInstalled = false // read from prefs in composable? 
                             GameListCard(
                                 game = game,
                                 isExpanded = isExpanded,
@@ -865,7 +925,13 @@ private fun GogGamesScreen(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         items(games, key = { it.gameId }) { game ->
+                            // Disk-truth fallback (see the list branch above) so a prior-session
+                            // install renders Installed + "Add to Launcher", not "Install".
+                            val context = LocalContext.current
                             val dlState = downloadStates[game.gameId]
+                                ?: if (GogInstallState.isInstalled(context, game.gameId))
+                                    GameDownloadState(isInstalled = true, buttonText = "Add to Launcher")
+                                else null
                             val isExpanded = expandedGameId == game.gameId
                             GameGridTile(
                                 game = game,
@@ -885,7 +951,7 @@ private fun GogGamesScreen(
                 Text(
                     text = "Your GOG library is empty",
                     fontSize = 14.sp,
-                    color = Color(0xFF666666),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center).padding(24.dp),
                 )
             }
@@ -893,7 +959,7 @@ private fun GogGamesScreen(
             if (isSyncing) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center).size(32.dp),
-                    color = Color(0xFF0055FF),
+                    color = MaterialTheme.colorScheme.primary,
                     strokeWidth = 3.dp,
                 )
             }
@@ -916,7 +982,7 @@ private fun GameListCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isExpanded) Color(0xFF0D0D0D) else Color.Black)
+            .background(if (isExpanded) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onClick)
             .padding(10.dp),
     ) {
@@ -924,7 +990,7 @@ private fun GameListCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Cover
             Box(
-                modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black),
+                modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface),
             ) {
                 if (game.imageUrl.isNotEmpty()) {
                     AsyncImage(
@@ -947,13 +1013,13 @@ private fun GameListCard(
                     Text(
                         text = game.title,
                         fontSize = 15.sp,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (downloadState?.isInstalled == true) {
-                        Text(" \u2713", fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                        Text(" \u2713", fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold) // semantic installed-green
                     }
                 }
                 if (game.developer.isNotEmpty() || game.category.isNotEmpty()) {
@@ -965,7 +1031,7 @@ private fun GameListCard(
                     Text(
                         text = sub,
                         fontSize = 11.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -975,7 +1041,7 @@ private fun GameListCard(
             Text(
                 text = if (isExpanded) "\u25B2" else "\u25BC",
                 fontSize = 14.sp,
-                color = Color(0xFF888888),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 8.dp).clickable { onExpandToggle() },
             )
         }
@@ -1008,7 +1074,7 @@ private fun ExpandedSection(
                 game.developer.isEmpty() -> game.category
                 else -> "${game.category} \u00B7 ${game.developer}"
             }
-            Text(meta, fontSize = 11.sp, color = Color(0xFF888888), modifier = Modifier.padding(top = 6.dp))
+            Text(meta, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
         }
 
         val isInstalled = downloadState?.isInstalled == true
@@ -1017,7 +1083,7 @@ private fun ExpandedSection(
             Text(
                 "\u2713 Installed",
                 fontSize = 10.sp,
-                color = Color(0xFF4CAF50),
+                color = Color(0xFF4CAF50), // semantic installed-green
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
@@ -1026,19 +1092,19 @@ private fun ExpandedSection(
             LinearProgressIndicator(
                 progress = { (downloadState.progress.coerceIn(0, 100)) / 100f },
                 modifier = Modifier.fillMaxWidth().height(6.dp).padding(top = 6.dp),
-                color = Color(0xFF0055FF),
-                trackColor = Color(0xFF2A2A2A),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
             )
             Text(
                 "${downloadState.progress}%",
                 fontSize = 12.sp,
-                color = Color(0xFF0055FF),
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
             )
             Text(
                 downloadState.status,
                 fontSize = 11.sp,
-                color = Color(0xFFAAAAAA),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
@@ -1047,8 +1113,9 @@ private fun ExpandedSection(
 
         val btnText = downloadState?.buttonText
             ?: if (isInstalled) "Add to Launcher" else "Install"
-        val btnColor = downloadState?.buttonColor
-            ?: if (isInstalled) 0xFF0055FF.toInt() else 0xFF0055FF.toInt()
+        // Container/content derived from theme at call site (btnText carries the intent);
+        // "Cancel" is the only destructive action \u2192 error, everything else \u2192 primary.
+        val isCancelBtn = btnText == "Cancel"
 
         Button(
             onClick = {
@@ -1058,10 +1125,20 @@ private fun ExpandedSection(
                     else -> onInstallClick()
                 }
             },
-            colors = ButtonDefaults.buttonColors(containerColor = Color(btnColor)),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isCancelBtn) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.primary,
+            ),
             modifier = Modifier.fillMaxWidth().height(40.dp),
             shape = RoundedCornerShape(8.dp),
-        ) { Text(btnText, color = Color.White, fontSize = 13.sp) }
+        ) {
+            Text(
+                btnText,
+                color = if (isCancelBtn) MaterialTheme.colorScheme.onError
+                else MaterialTheme.colorScheme.onPrimary,
+                fontSize = 13.sp,
+            )
+        }
     }
 }
 
@@ -1080,8 +1157,8 @@ private fun GameGridTile(
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black)
-            .border(1.dp, Color(0xFF0055FF).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
     ) {
         // Art area
@@ -1109,12 +1186,14 @@ private fun GameGridTile(
                         .align(Alignment.TopStart)
                         .padding(start = 4.dp, top = 4.dp)
                         .background(
-                            if (game.generation == 2) Color(0xCC0055FF) else Color(0xCC0044CC),
+                            // Gen badge = informational (not brand); themed accent, translucent over art.
+                            // gen1/gen2 no longer differ by hue — the "Gen N" label carries the distinction.
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                             RoundedCornerShape(3.dp),
                         )
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                 ) {
-                    Text("Gen ${game.generation}", fontSize = 8.sp, color = Color.White)
+                    Text("Gen ${game.generation}", fontSize = 8.sp, color = MaterialTheme.colorScheme.onPrimary)
                 }
             }
 
@@ -1141,7 +1220,7 @@ private fun GameGridTile(
                     modifier = Modifier.weight(1f),
                 )
                 if (downloadState?.isInstalled == true) {
-                    Text(" \u2713", fontSize = 11.sp, color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold)
+                    Text(" \u2713", fontSize = 11.sp, color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold) // semantic installed-green
                 }
             }
         }
@@ -1151,21 +1230,21 @@ private fun GameGridTile(
             val isInstalled = downloadState?.isInstalled == true
             val btnText = downloadState?.buttonText
                 ?: if (isInstalled) "Add to Launcher" else "Install"
-            val btnColor = downloadState?.buttonColor
-                ?: 0xFF0055FF.toInt()
+            // "Cancel" is the only destructive action \u2192 error; everything else \u2192 primary.
+            val isCancelBtn = btnText == "Cancel"
 
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0D0D0D))
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 if (downloadState?.progressVisible == true) {
                     LinearProgressIndicator(
                         progress = { (downloadState.progress.coerceIn(0, 100)) / 100f },
                         modifier = Modifier.fillMaxWidth().height(3.dp),
-                        color = Color(0xFF0055FF),
-                        trackColor = Color(0xFF2A2A2A),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     )
                 }
                 Button(
@@ -1176,11 +1255,21 @@ private fun GameGridTile(
                             else -> onInstallClick()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(btnColor)),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isCancelBtn) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
+                    ),
                     modifier = Modifier.fillMaxWidth().height(32.dp),
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(0.dp),
-                ) { Text(btnText, color = Color.White, fontSize = 11.sp) }
+                ) {
+                    Text(
+                        btnText,
+                        color = if (isCancelBtn) MaterialTheme.colorScheme.onError
+                        else MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 11.sp,
+                    )
+                }
             }
         }
     }
@@ -1191,10 +1280,11 @@ private fun GenBadge(generation: Int) {
     Text(
         text = "Gen $generation",
         fontSize = 10.sp,
-        color = Color.White,
+        color = MaterialTheme.colorScheme.onPrimary,
         modifier = Modifier
             .background(
-                if (generation == 2) Color(0xFF0055FF) else Color(0xFF0044CC),
+                // informational gen badge (not brand); gen1/gen2 distinction carried by the label
+                MaterialTheme.colorScheme.primary,
                 RoundedCornerShape(3.dp),
             )
             .padding(horizontal = 5.dp, vertical = 2.dp),
@@ -1242,26 +1332,27 @@ private fun InstallConfirmDialog(
             Column {
                 val sizeText = if (gameSize > 0) "Game size:  ${GogDownloadManager.formatBytes(gameSize)}"
                 else "Game size:  Fetching\u2026"
-                val sizeColor = if (gameSize > 0 && freeBytes > 0 && gameSize > freeBytes) 0xFFFF5252.toInt()
-                else 0xFFCCCCCC.toInt()
+                val notEnoughSpace = gameSize > 0 && freeBytes > 0 && gameSize > freeBytes
+                val sizeColor = if (notEnoughSpace) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant
                 Text(
                     text = sizeText,
                     fontSize = 14.sp,
-                    color = Color(sizeColor),
+                    color = sizeColor,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = "Available storage:  ${GogDownloadManager.formatBytes(freeBytes)}",
                     fontSize = 14.sp,
-                    color = if (gameSize > 0 && freeBytes > 0 && gameSize > freeBytes) Color(0xFFFF5252)
-                    else Color(0xFF88CC88),
+                    color = if (notEnoughSpace) MaterialTheme.colorScheme.error
+                    else Color(0xFF88CC88), // semantic storage-ok green
                 )
-                if (gameSize > 0 && freeBytes > 0 && gameSize > freeBytes) {
+                if (notEnoughSpace) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = "\u26A0 Not enough space",
                         fontSize = 14.sp,
-                        color = Color(0xFFFF5252),
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
@@ -1271,10 +1362,10 @@ private fun InstallConfirmDialog(
             TextButton(
                 onClick = onConfirm,
                 enabled = canInstall,
-            ) { Text("Install", color = if (canInstall) Color(0xFF0055FF) else Color(0xFF666666)) }
+            ) { Text("Install", color = if (canInstall) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFFAAAAAA)) }
+            TextButton(onClick = onDismiss) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         },
     )
 }
@@ -1301,12 +1392,12 @@ private fun DetailDialog(
                 Text(
                     text = msg.trim(),
                     fontSize = 12.sp,
-                    color = Color(0xFFCCCCCC),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = Color(0xFFAAAAAA)) }
+            TextButton(onClick = onDismiss) { Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         },
     )
 }

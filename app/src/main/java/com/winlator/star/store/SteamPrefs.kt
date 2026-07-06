@@ -74,6 +74,22 @@ object SteamPrefs {
     val isLoggedIn: Boolean
         get() = refreshToken.isNotEmpty() && username.isNotEmpty()
 
+    // ── Goldberg (gbe_fork) per-game emulator mode ───────────────────────────
+    // Keyed by appId so it survives uninstall/reinstall of the app's session.
+    // Stored here (not in SteamDatabase) to avoid a Room migration + versionCode
+    // bump — it's per-game install config, not credentials, so clear() leaves it.
+
+    private const val K_GOLDBERG_PREFIX = "goldberg_mode_"
+
+    /** Persisted Goldberg mode for [appId]; unknown/absent → OFF. */
+    fun getGoldbergMode(appId: Int): GoldbergMode =
+        GoldbergMode.fromKey(prefs.getString(K_GOLDBERG_PREFIX + appId, null))
+
+    /** Persist the chosen Goldberg mode for [appId]. */
+    fun setGoldbergMode(appId: Int, mode: GoldbergMode) {
+        prefs.edit().putString(K_GOLDBERG_PREFIX + appId, mode.name).apply()
+    }
+
     /** Wipe all Steam credentials and session state. */
     fun clear() {
         prefs.edit()

@@ -158,6 +158,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var desktopThemeIndex by mutableStateOf(0)   // 0=LIGHT, 1=DARK
     var desktopBgTypeIndex by mutableStateOf(0)  // 0=IMAGE, 1=COLOR
     var desktopBgColorInt by mutableStateOf(Color.parseColor("#0277bd"))
+    // 0=GLOBAL (shared across all containers), 1=CONTAINER (this container only)
+    var desktopWallpaperScopeIndex by mutableStateOf(WineThemeManager.BackgroundScope.GLOBAL.ordinal)
     var mouseWarpEntries by mutableStateOf(emptyList<String>()); private set
     var selectedMouseWarpIndex by mutableStateOf(0)
 
@@ -383,6 +385,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         desktopThemeIndex   = themeInfo.theme.ordinal
         desktopBgTypeIndex  = themeInfo.backgroundType.ordinal
         desktopBgColorInt   = themeInfo.backgroundColor
+        desktopWallpaperScopeIndex = themeInfo.wallpaperScope.ordinal
 
         // Mouse warp (from registry, only in edit mode)
         if (c != null) {
@@ -707,13 +710,30 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         return StringUtils.parseIdentifier(selectedScreenSize)
     }
 
+    /**
+     * The presumptive container id used for the per-container wallpaper path. In edit mode this
+     * is the real container id; in create mode the container doesn't exist yet, so we use the id
+     * the manager will hand out next (same value used for the default container name at :277).
+     */
+    private fun effectiveContainerId(): Int = container?.id ?: manager.getNextContainerId()
+
+    /** Global vs per-container wallpaper file for the given scope. */
+    fun wallpaperFileFor(scope: WineThemeManager.BackgroundScope): File =
+        if (scope == WineThemeManager.BackgroundScope.CONTAINER)
+            WineThemeManager.getUserWallpaperFile(context, effectiveContainerId())
+        else
+            WineThemeManager.getUserWallpaperFile(context)
+
     private fun buildDesktopThemeStr(colorAsString: String): String {
         val theme   = WineThemeManager.Theme.values()[desktopThemeIndex]
         val bgType  = WineThemeManager.BackgroundType.values()[desktopBgTypeIndex]
         var str = "${theme},${bgType},$colorAsString"
         if (bgType == WineThemeManager.BackgroundType.IMAGE) {
-            val wallpaper = WineThemeManager.getUserWallpaperFile(context)
-            str += "," + if (wallpaper.isFile) wallpaper.lastModified() else "0"
+            // Format: theme,bgType,color,SCOPE,mtime — SCOPE makes the launch path pick the right
+            // file; mtime is a cache-bust so overwriting the chosen wallpaper regenerates the BMP.
+            val scope = WineThemeManager.BackgroundScope.values()[desktopWallpaperScopeIndex]
+            val wallpaper = wallpaperFileFor(scope)
+            str += ",$scope," + if (wallpaper.isFile) wallpaper.lastModified() else "0"
         }
         return str
     }

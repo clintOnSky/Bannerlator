@@ -31,6 +31,9 @@ on:
 permissions:
   contents: write
 
+env:
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
 jobs:
   build:
 
@@ -43,14 +46,32 @@ jobs:
         submodules: recursive
         fetch-depth: 20
 
-    - name: set up JDK 17
+    - name: Set up JDK 17 (preinstalled toolchain, no apt)
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Set up Gradle (dependency + build cache)
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Resolve JavaSteam upstream commit (for cache key)
+      id: jsref
       run: |
-        sudo apt-get update -q
-        sudo apt-get install -y -q openjdk-17-jdk
-        echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
-        echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH
+        SHA=$(git ls-remote https://github.com/joshuatam/JavaSteam gamenative-latest 2>/dev/null | head -1 | cut -f1)
+        [ -z "$SHA" ] && SHA="unknown"
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        echo "JavaSteam gamenative-latest = $SHA"
+
+    - name: Cache JavaSteam JARs
+      id: cache-javasteam
+      uses: actions/cache@v4
+      with:
+        path: app/libs/steam
+        key: javasteam-${{ steps.jsref.outputs.sha }}
 
     - name: Build JavaSteam and copy JARs to app/libs/steam
+      if: steps.cache-javasteam.outputs.cache-hit != 'true'
       run: |
         git clone --depth 1 -b gamenative-latest https://github.com/joshuatam/JavaSteam javasteam_src
         cd javasteam_src
@@ -132,23 +153,45 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Install NDK
+    - name: Cache NDK + cmake
+      id: cache-ndk
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
+          ${{ env.ANDROID_SDK_ROOT }}/cmake/3.22.1
+        key: ndk-26.1.10909125-cmake-3.22.1
+
+    - name: Install NDK (only if not cached) + export ANDROID_NDK_HOME
       run: |
-        SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+        SDK_ROOT="${ANDROID_SDK_ROOT}"
         mkdir -p "$SDK_ROOT"
-        if [ ! -f "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-          curl -sL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdline-tools.zip
-          unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools/
-          mkdir -p "$SDK_ROOT/cmdline-tools"
-          mv /tmp/cmdline-tools/cmdline-tools "$SDK_ROOT/cmdline-tools/latest" 2>/dev/null || true
-          rm -f /tmp/cmdline-tools.zip
+        if [ ! -f "$SDK_ROOT/ndk/26.1.10909125/source.properties" ]; then
+          if [ ! -f "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            curl -sL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdline-tools.zip
+            unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools/
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            mv /tmp/cmdline-tools/cmdline-tools "$SDK_ROOT/cmdline-tools/latest" 2>/dev/null || true
+            rm -f /tmp/cmdline-tools.zip
+          fi
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1"
+        else
+          echo "NDK already present (cache hit) — skipping sdkmanager install"
         fi
-        yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1"
         echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
     - name: Grant execute permission for build script
       run: chmod +x build-lsfg-android.sh
-    - name: Build LSFG native library
+
+    - name: Cache LSFG native library
+      id: cache-lsfg
+      uses: actions/cache@v4
+      with:
+        path: app/src/main/jniLibs/arm64-v8a/libVkLayer_LSFGVK_frame_generation.so
+        key: lsfg-${{ hashFiles('app/src/main/cpp/lsfg-vk/**', 'build-lsfg-android.sh') }}
+
+    - name: Build LSFG native library (only if not cached)
+      if: steps.cache-lsfg.outputs.cache-hit != 'true'
       run: ./build-lsfg-android.sh
 
     - name: Build with Gradle

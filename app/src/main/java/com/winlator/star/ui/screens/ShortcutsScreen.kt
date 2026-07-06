@@ -187,6 +187,38 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var scrapeLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // Shared "Scrape cover" action so both grid tiles and list rows fire the same flow.
+    val scrapeCoverFor: (Shortcut) -> Unit = { shortcut ->
+        scrapeTarget = shortcut
+        scrapeCovers.clear()
+        scrapeLoading = true
+        scope.launch(Dispatchers.IO) {
+            val json = StarLaunchBridge.sgdbFetchGridsJson(shortcut.name)
+            val covers = mutableListOf<Pair<Bitmap, String>>()
+            try {
+                val arr = JSONArray(json)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val thumbUrl = obj.optString("thumb", "")
+                    val fullUrl = obj.optString("url", "")
+                    if (thumbUrl.isNotEmpty() && fullUrl.isNotEmpty()) {
+                        val conn = java.net.URL(thumbUrl).openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 10000
+                        conn.readTimeout = 10000
+                        val bmp = BitmapFactory.decodeStream(conn.inputStream)
+                        conn.disconnect()
+                        if (bmp != null) covers.add(bmp to fullUrl)
+                    }
+                }
+            } catch (_: Exception) {}
+            withContext(Dispatchers.Main) {
+                scrapeCovers.clear()
+                scrapeCovers.addAll(covers)
+                scrapeLoading = false
+            }
+        }
+    }
+
     val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         if (pendingImportContainerIndex >= 0) {
@@ -285,36 +317,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onAddToHome = { addToHomeScreen(context, shortcut) },
                                     onExport = { exportShortcut(context, shortcut) },
                                     onProperties = { propertiesShortcut = shortcut },
-                                    onScrapeCover = {
-                                        scrapeTarget = shortcut
-                                        scrapeCovers.clear()
-                                        scrapeLoading = true
-                                        scope.launch(Dispatchers.IO) {
-                                            val json = StarLaunchBridge.sgdbFetchGridsJson(shortcut.name)
-                                            val covers = mutableListOf<Pair<Bitmap, String>>()
-                                            try {
-                                                val arr = JSONArray(json)
-                                                for (i in 0 until arr.length()) {
-                                                    val obj = arr.getJSONObject(i)
-                                                    val thumbUrl = obj.optString("thumb", "")
-                                                    val fullUrl = obj.optString("url", "")
-                                                    if (thumbUrl.isNotEmpty() && fullUrl.isNotEmpty()) {
-                                                        val conn = java.net.URL(thumbUrl).openConnection() as java.net.HttpURLConnection
-                                                        conn.connectTimeout = 10000
-                                                        conn.readTimeout = 10000
-                                                        val bmp = BitmapFactory.decodeStream(conn.inputStream)
-                                                        conn.disconnect()
-                                                        if (bmp != null) covers.add(bmp to fullUrl)
-                                                    }
-                                                }
-                                            } catch (_: Exception) {}
-                                            withContext(Dispatchers.Main) {
-                                                scrapeCovers.clear()
-                                                scrapeCovers.addAll(covers)
-                                                scrapeLoading = false
-                                            }
-                                        }
-                                    },
+                                    onScrapeCover = { scrapeCoverFor(shortcut) },
                                 )
                             }
                         }
@@ -337,6 +340,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onAddToHome = itemAddToHome,
                                     onExport = itemExport,
                                     onProperties = itemProperties,
+                                    onScrapeCover = { scrapeCoverFor(shortcut) },
                                 )
                             }
                         }
@@ -609,6 +613,7 @@ private fun ShortcutItemLayoutL(
     onAddToHome: () -> Unit,
     onExport: () -> Unit,
     onProperties: () -> Unit,
+    onScrapeCover: () -> Unit,
 ) {
     val container = shortcut.container
     val res = LocalContext.current.resources
@@ -711,6 +716,7 @@ private fun ShortcutItemLayoutL(
             onAddToHome = onAddToHome,
             onExport = onExport,
             onProperties = onProperties,
+            onScrapeCover = onScrapeCover,
         )
       }
     }
@@ -725,6 +731,7 @@ private fun ShortcutOverflowButton(
     onAddToHome: () -> Unit,
     onExport: () -> Unit,
     onProperties: () -> Unit,
+    onScrapeCover: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
@@ -756,6 +763,11 @@ private fun ShortcutOverflowButton(
                 text = { Text("Export") },
                 leadingIcon = { Icon(Icons.Filled.Upload, null) },
                 onClick = { menuExpanded = false; onExport() },
+            )
+            DropdownMenuItem(
+                text = { Text("Scrape cover") },
+                leadingIcon = { Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.primary) },
+                onClick = { menuExpanded = false; onScrapeCover() },
             )
             DropdownMenuItem(
                 text = { Text("Properties") },

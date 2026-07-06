@@ -55,7 +55,7 @@ public class AmazonCredentialStore {
                 fos.write(json.toString().getBytes(StandardCharsets.UTF_8));
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to save credentials", e);
+            Log.e(TAG, "Failed to save credentials: " + e.getClass().getSimpleName());
         }
     }
 
@@ -80,7 +80,9 @@ public class AmazonCredentialStore {
             creds.expiresAt    = json.optLong("expires_at",      0L);
             return creds;
         } catch (Exception e) {
-            Log.e(TAG, "Failed to load credentials", e);
+            // Do NOT log the throwable — a JSONException message can echo the raw
+            // contents of credentials.json (tokens, device serial).
+            Log.e(TAG, "Failed to load credentials: " + e.getClass().getSimpleName());
             return null;
         }
     }

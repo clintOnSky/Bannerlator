@@ -17,7 +17,6 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -241,25 +240,37 @@ public class FolderPickerActivity extends Activity {
             .setPositiveButton("Create", (d, w) -> {
                 String name = input.getText().toString().trim();
                 if (name.isEmpty()) {
-                    Toast.makeText(this, "Enter a folder name", Toast.LENGTH_SHORT).show();
+                    showThemedMessage("Enter a folder name");
                     return;
                 }
                 // Reject names with path separators
                 if (name.contains("/") || name.contains("\\")) {
-                    Toast.makeText(this, "Folder name cannot contain slashes", Toast.LENGTH_SHORT).show();
+                    showThemedMessage("Folder name cannot contain slashes");
                     return;
                 }
                 File newDir = new File(currentDir, name);
                 if (newDir.exists()) {
-                    Toast.makeText(this, "Folder already exists", Toast.LENGTH_SHORT).show();
+                    showThemedMessage("Folder already exists");
                 } else if (newDir.mkdir()) {
                     refreshList();
-                    Toast.makeText(this, "Created: " + name, Toast.LENGTH_SHORT).show();
+                    showThemedMessage("Created: " + name);
                 } else {
-                    Toast.makeText(this, "Failed to create folder", Toast.LENGTH_SHORT).show();
+                    showThemedMessage("Failed to create folder");
                 }
             })
             .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    /**
+     * Themed replacement for the old black-box Toasts. System Toasts render as an unreadable
+     * black box on this ROM (targetSDK 28); this isn't a Compose screen so the shared
+     * UninstallResultBar can't apply — use the dark alert-dialog style instead.
+     */
+    private void showThemedMessage(String msg) {
+        new AlertDialog.Builder(this, com.winlator.star.R.style.StoreAlertDialogDark)
+            .setMessage(msg)
+            .setPositiveButton("OK", null)
             .show();
     }
 

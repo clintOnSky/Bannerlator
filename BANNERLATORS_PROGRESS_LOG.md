@@ -464,3 +464,149 @@ entries byte-identical, swapped exes carry sibling metadata (uid 10314/gid 1023,
 ⚠️ TEMPLATE = NEW containers only — existing containers keep the old exe (reinstall-imagefs
 preserves home/), so to update them push the exes via root bridge or make a new container.
 Lands in the next Bannerlator build; no tag/release cut.
+
+## 2026-07-01 — Steam store Compose M3 restyle (branch feat/steam-store-compose)
+Decision: keep our JavaSteam backend (same lib family GameNative uses; theirs is GPL-3.0 +
+proprietary blobs + monolithic coupling — vendoring rejected), rebuild only the UI/UX. The five
+Steam screens were already Compose, just hardcoded 0055FF/black — restyled all onto live
+MaterialTheme.colorScheme tokens (`0ca11e0`): library header→icon buttons, grid tiles→2:3
+Shortcuts idiom, list items→ContainerItem cards, detail screen Int-color state→semantic enums
+(InstallAction/PauseAction/GameStatus) resolved in composition, login/QR themed, onPrimary
+everywhere (white-accent-safe). Backend files untouched. Local compileLudashiDebugKotlin GREEN
+(aapt2 override needed in PRoot: -Pandroid.aapt2FromMavenOverride=termux aapt2).
+NEXT after this proves out: smart container-picker (rank existing containers; NO auto-create per
+game — user rule) + community-config recommendations from The412Banner/bannerhub-game-configs
+(2,869 games, per-device SoC-keyed GameHub-schema configs; needs precomputed aggregation +
+name→appId mapping + component-version translation). Gate: CI green then on-device visual pass
+(grid density, download/pause/cancel states, white-accent preset).
+Update: branch pushed; CI artifacts run 28556819972 (label steam-store-m3) in flight with watcher;
+root bridge pinged OK — on green, APK goes to device /sdcard/Download for the visual pass.
+
+## 2026-07-01 (cont.) — Compose container picker + result dialog; black-toast root cause fixed
+Device pass of build 1 found the add-to-shortcuts toast = BLACK BOX: targetSdk 28 renders toasts
+in-app with @style/AppTheme = AppCompat.Light + colorBackground forced #000000 → black-on-black.
+Replaced the whole handoff UI (`3910337`): StarLaunchBridge split (loadContainers/writeShortcutAsync
+result callbacks; legacy dialog+toast path kept for Epic/GOG/Amazon but toasts now explicit
+white-on-grey custom view), new store/compose/AddToShortcutsFlow.kt (M3 ContainerPickerDialog +
+AddResultDialog), Steam screens wired to it, MainActivity EXTRA_OPEN_SCREEN deep-link (validated
+against drawerItems; onNewIntent + pendingRoute→LaunchedEffect nav) so "Open Shortcuts" jumps
+CLEAR_TOP|SINGLE_TOP into the Shortcuts (Games) route. Kotlin+Java compile GREEN. Device gate:
+picker rows, result dialog, deep-link from store stack, legacy toast readability.
+
+## 2026-07-01 (cont.) — PLAN: Goldberg auto-patch button (regular/experimental/coldclient ladder)
+Motivation: device-tested Brawlhalla (installed via depot DL) — Goldberg got it BOOTING but hit
+Brawlhalla "Error 3003" = its own SERVER connection fail (online-only game), NOT a Steam-client
+error. Lesson baked into UI copy: Goldberg unlocks DRM/ownership-gated games so they START without
+a running Steam client; it CANNOT make online-only games reach publisher servers. App has ZERO
+Goldberg handling today (grep clean) — net-new feature. Goldberg folder on device =
+/storage/emulated/0/Winlator/Games/Goldberg = gbe_fork build (regular/ = steam_api only;
+experimental/ = steam_api + steamclient; steamclient_experimental/ = ColdClientLoader + loader exe;
+tools/generate_interfaces; steam_settings.EXAMPLE/). Game installed under imagefs (ludashi pkg).
+
+DESIGN (agreed): opt-in TOGGLE on game detail page, escalating tiers Off→Regular→Experimental→
+ColdClient, each framed "try if previous failed". Store's edge = we KNOW appId+installDir → auto
+steam_appid.txt (kills the appid=0 failure class).
+ORDER OF OPS:
+ SHARED PREP (once): (1) scan installDir for all steam_api(64).dll, record path+arch via PE header;
+ (2) if none → message "game doesn't use Steam API, N/A"; (3) byte-scan ORIGINAL dll for
+ SteamClient0xx interface strings → steam_settings/steam_interfaces.txt (reimplement
+ generate_interfaces, no foreign binary); (4) back up each original → .dll.bak (only if absent =
+ permanent pristine source); (5) write steam_settings/steam_appid.txt + steam_appid.txt beside each
+ dll (known appId).
+ TIER1 Regular: copy regular/<arch>/steam_api(64).dll over each. Default.
+ TIER2 Experimental: experimental/<arch>/steam_api(64).dll + steamclient(64).dll alongside.
+ TIER3 ColdClient: RESTORE original steam_api, drop steamclient_experimental files, gen
+ ColdClientLoader.ini (appId+exe+rundir), REPOINT launch shortcut Exec→steamclient_loader_x64.exe.
+GOLDEN RULES: always apply FROM .bak (restore-then-apply on every tier switch — idempotent, no
+stacking); "Restore original" always available (also restores shortcut Exec for ColdClient).
+WRINKLE: ColdClient changes launch command → per-game Goldberg mode must be stored + resolved at
+shortcut-write/launch time (coordinates w/ StarLaunchBridge). Tiers 1-2 = pure file swap, no launch
+change. Bundle a pinned Goldberg (gbe_fork) in app assets, extract to imagefs on first use (turnkey,
+don't depend on user's Winlator/Games/Goldberg folder). Sequenced on branch stacked on
+feat/steam-store-compose (picker work still device-gating build 2 run 28560163675).
+
+## 2026-07-01 (cont.) — Goldberg auto-patch BUILT + catalog PUBLISHED
+Engineer built the full feature on feat/steam-goldberg-patcher (commit 4563ae2, off device-proven
+feat/steam-store-compose). Kotlin+Java compile GREEN. Two-pass: assets-bundle first, then reworked
+to DOWNLOAD-ON-DEMAND per user request (mirror ReShade). GoldbergComponent.kt: goldberg.json →
+Downloader.downloadFile → UPPERCASE-MD5 → TarCompressorUtils.extract(ZSTD) → {filesDir}/imagefs/
+opt/goldberg/ (installed = dir exists, marker regular/x64/steam_api64.dll). Detail page shows
+"Download Steam Emulator (~size)" until installed, then tiers Off/Regular/Experimental/ColdClient
+on every game page (one global DL). Per-game mode in SteamPrefs goldberg_mode_<appId>.
+GoldbergPatcher.kt: PE-header arch detect, interface-string scan→steam_interfaces.txt+steam_appid.txt,
+restore-from-.bak-first golden rule, resolveLaunchExe (ColdClient→loader exe), honest online-only
+UI caveat.
+PACKAGE PUBLISHED (LIVE): pulled exact gbe_fork off device (byte-verified), rebuilt clean combined
+goldberg.tzst (tier folders at root, essentials only) SIZE=35938867 MD5=BC48B103AD3B067D3ED7CDFDAF728A4A
+(round-trip identical). Repo The412Banner/winlator-contents: release goldberg-v1 asset goldberg.tzst
+(HTTP 200) + goldberg.json at repo root main. ColdClientLoader.ini = standard gbe_fork keys (verified).
+GATE: NOT device-proven (patch+launch unexercised). Pushing branch + CI build for device test.
+
+## 2026-07-01 (cont.) — branch consolidation
+Deleted feat/steam-store-compose (local + remote). Verified it had ZERO unique commits — the
+device-proven store rebuild (M3 restyle + Compose container picker + result dialog + toast fix)
+is fully contained in feat/steam-goldberg-patcher, which was branched off it (strict superset:
+store work + 2 Goldberg commits). Single line forward = feat/steam-goldberg-patcher. No code lost.
+NOT merged to main; Goldberg still device-gating (CI build 28561426643).
+
+## 2026-07-01 (cont.) — Goldberg DEVICE-PARTIAL-PROVEN (screenshots)
+On the CI build (feat/steam-goldberg-patcher): download button appeared → fetched goldberg.json →
+downloaded the published goldberg.tzst → MD5-verified → extracted; result dialog "Steam Emulator
+installed. Pick a mode below." then the themed tier selector (Off/Regular/Experimental/Cold Client
+Loader) renders correctly on colorScheme with the honest online-only caveat copy. CONFIRMED on device:
+catalog delivery (my winlator-contents goldberg-v1 asset), global install gating, themed UI. STILL
+UNPROVEN: actual patch→launch (DLL swap gets a game past the Steam check) — needs a SINGLE-PLAYER
+Steam title (shown on Brawlhalla = online-only, so Error 3003 is server-side, not a patch validation).
+
+## 2026-07-01 (cont.) — Steam download size/progress fix + overlapping dual-color bar
+Commit ad4887f on feat/steam-goldberg-patcher (Kotlin+Java green on ludashi AND standard flavors).
+native-steam-engineer decompiled javasteam-depotdownloader-1.8.0.jar, read DepotDownloader.getDepotInfo
+selection logic, mirrored it EXACTLY in SteamRepository PICS parse: count a depot only if it has a
+public manifest AND (no config OR oslist empty/contains windows) AND language empty/english AND not
+lowviolence; osarch NOT checked (matches our AppItem downloadAllArchs=true). Fixes inflated size
+(HL2 ~14.7GB→~half) since it no longer sums mac/linux/other-language/optional depots. Progress
+denominator switched to summed SELECTED-depot manifest bytes (numerator+denominator same units).
+onChunkCompleted now sums bytes across ALL depots via two ConcurrentHashMap<Int,Long> (install=
+uncompressed, download=compressed) → fixes the ~50% stall (was tracking only largest single depot).
+DUAL BAR: event now DownloadProgress:appId:installDone:installTotal:downloadDone:downloadTotal;
+detail-page LinearProgressIndicator → Box track (surfaceVariant) + lighter download fill
+(primary alpha .4) + solid install fill (primary) on top. downloadTotal from parsing
+manifests/public/download (compressed), in-memory downloadSizeByApp map, NO DB schema change (still v3).
+Pause/resume seeds both accumulators from persisted install bytes (download approximated by install
+fraction on resume, dlog'd). Parser back-compat: dDone/dTotal default to install values.
+GATE: device — HL2 size ~half + logcat "depots: selected=/skipped=" line; smooth 0→100 dual fills on
+a multi-depot download; paused/resumed mid-download percentage sane.
+
+## 2026-07-01 (cont.) — end of session; user testing in the morning
+CI build 28563136132 (label steam-dl-progress) building overnight off feat/steam-goldberg-patcher
+(tip = size/progress fix + dual bar ad4887f). User will grab the ludashi APK from the run page and
+device-test in the morning (2026-07-02). MORNING CHECKLIST:
+ 1. Goldberg patch→launch on a SINGLE-PLAYER Steam title (Regular→Launch, past the Steam check) —
+    the one still-unproven piece (download+UI already device-proven; Brawlhalla can't validate = online-only).
+ 2. Half-Life 2 (appid 220) size reads ~half of the old ~14.7GB; logcat "depots: selected=/skipped=" confirms set.
+ 3. Multi-depot download: bar climbs smooth 0→100, no ~48-50% stall; dual fills (solid install + lighter download).
+ 4. Pause/resume mid-download: percentage stays sane.
+Branch NOT merged; accumulating (store rebuild + Goldberg + dl fix all on feat/steam-goldberg-patcher).
+
+## 2026-07-01 (cont.) — BUG TO CHASE IN MORNING: download fails ~1hr after login (session expiry)
+User report: logged in, ~1hr later can't start a game download. Suspects login/refresh-token needs
+refreshing. QUICK DIAGNOSIS (code read, NOT yet confirmed on device):
+LIKELY ROOT CAUSE = SteamRepository.onLoggedOff (LoggedOffCallback, :485-489) just sets loggedIn=false
++ emit("LoggedOut") and does NOT auto re-login with the stored refresh token. Contrast onDisconnected
+(:445-464) which DOES auto-reconnect+relogin. So a socket DISCONNECT self-heals, but a Steam-side
+LOGGED-OFF (session/access-token timeout after idle, ~1hr) leaves loggedIn=false with no recovery.
+Then the download path (SteamDepotDownloader :158-182): steamClient non-null, but if !isLoggedIn it
+calls ensureLoggedIn() (SteamRepository :831-834) which fires loginWithToken ASYNC (non-blocking) and
+returns immediately → download proceeds before re-logon completes; licenses may still be cached
+(onLoggedOff does NOT clear them) so the empty-check passes, but depot-key/manifest requests need a
+live authenticated session → fail. User's "refresh token" intuition is basically right: token is
+stored + could re-login, but nothing triggers it on LoggedOff and the download's ensureLoggedIn
+doesn't WAIT.
+MORNING: (1) reproduce + capture `getlog com.winlator.banner` at the moment of the failed download —
+confirm whether onLoggedOff fired (LoggedOff:<result>) vs onDisconnected. (2) FIX DIRECTIONS:
+  a. onLoggedOff: if !userInitiated && refresh token stored → auto loginWithToken (mirror
+     onDisconnected auto-reconnect). Refresh token is long-lived; re-logon mints a fresh access token.
+  b. Make download's ensureLoggedIn BLOCK on the LoggedOn callback (latch + timeout) before firing
+     depot requests, so re-login completes first.
+Note: access tokens from refresh-token logon ~24h, but CM session drops on idle far sooner; app
+backgrounding + foreground-service socket idle is a plausible trigger. NOT fixed tonight (needs repro).

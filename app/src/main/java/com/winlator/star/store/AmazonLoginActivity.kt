@@ -7,11 +7,13 @@ import android.util.Log
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
@@ -28,6 +30,10 @@ class AmazonLoginActivity : ComponentActivity() {
     private var pendingClientId: String? = null
 
     private val codeCaptured = AtomicBoolean(false)
+
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse the shared UninstallResultBar for readable feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +53,7 @@ class AmazonLoginActivity : ComponentActivity() {
                     onRedirectCaptured = { view, url -> handleCodeCapture(view, url) },
                     modifier = Modifier.fillMaxSize(),
                 )
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
     }
@@ -57,7 +64,7 @@ class AmazonLoginActivity : ComponentActivity() {
 
         val code = extractAuthCode(url)
         if (code == null) {
-            Log.e(TAG, "Amazon redirect missing auth code: $url")
+            Log.e(TAG, "Amazon redirect missing auth code")
             codeCaptured.set(false)
             return
         }
@@ -79,11 +86,7 @@ class AmazonLoginActivity : ComponentActivity() {
                 Log.e(TAG, "Device registration failed")
                 withContext(Dispatchers.Main) {
                     codeCaptured.set(false)
-                    Toast.makeText(
-                        this@AmazonLoginActivity,
-                        "Amazon login failed, please try again",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "Amazon login failed, please try again"
                 }
                 return@launch
             }

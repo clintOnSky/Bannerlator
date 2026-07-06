@@ -40,6 +40,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -103,6 +104,8 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
 
     var darkMode by remember { mutableStateOf(prefs.getBoolean("dark_mode", false)) }
     var bigPictureMode by remember { mutableStateOf(prefs.getBoolean("enable_big_picture_mode", false)) }
+    // Default screen the app opens to: "games" (Game Shortcuts, historical default) or "containers".
+    var defaultLandingScreen by remember { mutableStateOf(prefs.getString("default_landing_screen", "games") ?: "games") }
     var customApiKeyEnabled by remember { mutableStateOf(prefs.getBoolean("enable_custom_api_key", false)) }
     var customApiKey by remember { mutableStateOf(prefs.getString("custom_api_key", "") ?: "") }
     var cursorLock by remember { mutableStateOf(prefs.getBoolean("cursor_lock", false)) }
@@ -186,6 +189,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         editor.putString("fexcore_preset", selectedFEXCorePreset)
         editor.putBoolean("dark_mode", darkMode)
         editor.putBoolean("enable_big_picture_mode", bigPictureMode)
+        editor.putString("default_landing_screen", defaultLandingScreen)
         editor.putBoolean("enable_custom_api_key", customApiKeyEnabled)
         if (customApiKeyEnabled) editor.putString("custom_api_key", customApiKey)
         else editor.remove("custom_api_key")
@@ -669,6 +673,31 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             }
         }
 
+        // ── Default Screen on Launch ──────────────────────────────────
+        FieldSetLabel("Default Screen on Launch")
+        FieldSet {
+            Text(
+                "Which screen the app opens to.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = defaultLandingScreen == "games",
+                    onClick = { defaultLandingScreen = "games" },
+                )
+                Text("Game Shortcuts", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = defaultLandingScreen == "containers",
+                    onClick = { defaultLandingScreen = "containers" },
+                )
+                Text("Containers", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            }
+        }
+
         // ── Big Picture Mode ──────────────────────────────────────────
         FieldSetLabel("Big Picture Mode")
         FieldSet {
@@ -776,7 +805,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                 Text("Enable File Provider", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = {
-                    AppUtils.showHelpBox(context, null, R.string.help_file_provider)
+                    AppUtils.showHelpBox(context, android.view.View(context), R.string.help_file_provider)
                 }) { Icon(Icons.Default.Help, "Help", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {

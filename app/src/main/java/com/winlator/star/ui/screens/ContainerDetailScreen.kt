@@ -11,6 +11,7 @@ import android.provider.DocumentsContract
 import android.view.View
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,7 +28,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -47,8 +52,11 @@ import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GPUInformation
+import com.winlator.star.core.ImageUtils
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineThemeManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.lazy.items
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
@@ -804,6 +812,75 @@ private fun WineConfigTab(
                         update = { cpv -> cpv.setColor(viewModel.desktopBgColorInt) },
                         modifier = Modifier.size(48.dp)
                     )
+                }
+            }
+            // Wallpaper picker (visible when Image selected). The picked image is written to a
+            // GLOBAL user-wallpaper.png (shared by all containers) or a per-container
+            // user-wallpaper-<id>.png depending on the scope selector. On Save
+            // buildDesktopThemeStr() emits the scope + the chosen file's mtime, so switching scope
+            // or overwriting the file regenerates this container's Wine wallpaper.
+            if (viewModel.desktopBgTypeIndex == WineThemeManager.BackgroundType.IMAGE.ordinal) {
+                val context = LocalContext.current
+                val ioScope = rememberCoroutineScope()
+                val scopeOptions = listOf("All containers", "This container")
+                val currentScope = WineThemeManager.BackgroundScope.values()
+                    .getOrElse(viewModel.desktopWallpaperScopeIndex) { WineThemeManager.BackgroundScope.GLOBAL }
+                // File depends on the selected scope; getNextContainerId() is O(1) so recomputing
+                // per recomposition is cheap.
+                val wallpaperFile = viewModel.wallpaperFileFor(currentScope)
+                // Both the file path AND the mtime can change (scope switch / new pick), so drive
+                // preview reload off (scopeIndex, stamp). Stamp is bumped on the main thread after
+                // a successful save.
+                var wallpaperStamp by remember { mutableStateOf(0L) }
+                var preview by remember { mutableStateOf<ImageBitmap?>(null) }
+
+                LaunchedEffect(viewModel.desktopWallpaperScopeIndex, wallpaperStamp) {
+                    preview = if (wallpaperFile.isFile) {
+                        withContext(Dispatchers.IO) {
+                            BitmapFactory.decodeFile(wallpaperFile.path)?.asImageBitmap()
+                        }
+                    } else null
+                }
+
+                val pickWallpaperLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.GetContent()
+                ) { uri ->
+                    uri ?: return@rememberLauncherForActivityResult
+                    ioScope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            val bitmap = ImageUtils.getBitmapFromUri(context, uri, 1280)
+                                ?: return@withContext false
+                            wallpaperFile.parentFile?.mkdirs()
+                            ImageUtils.save(bitmap, wallpaperFile, Bitmap.CompressFormat.PNG, 100)
+                        }
+                        if (ok) wallpaperStamp = wallpaperFile.lastModified()
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                LabeledDropdown(
+                    label = "Apply wallpaper to",
+                    options = scopeOptions,
+                    selectedOption = scopeOptions.getOrElse(viewModel.desktopWallpaperScopeIndex) { scopeOptions[0] },
+                    onSelect = { opt -> viewModel.desktopWallpaperScopeIndex = scopeOptions.indexOf(opt).coerceAtLeast(0) }
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Wallpaper Image", modifier = Modifier.weight(1f))
+                    preview?.let { img ->
+                        Image(
+                            bitmap = img,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    OutlinedButton(onClick = { pickWallpaperLauncher.launch("image/*") }) {
+                        Text(if (preview != null) "Change" else "Browse")
+                    }
                 }
             }
         }

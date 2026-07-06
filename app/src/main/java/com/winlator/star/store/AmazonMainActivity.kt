@@ -2,7 +2,6 @@ package com.winlator.star.store
 
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -34,6 +33,10 @@ class AmazonMainActivity : ComponentActivity() {
     private var isLoggedIn by mutableStateOf(false)
     private var statusText by mutableStateOf("")
 
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse the shared UninstallResultBar for readable feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -45,6 +48,7 @@ class AmazonMainActivity : ComponentActivity() {
                     onViewLibrary = { startActivity(Intent(this@AmazonMainActivity, AmazonGamesActivity::class.java)) },
                     onSignOut = { signOut() },
                 )
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
     }
@@ -75,7 +79,7 @@ class AmazonMainActivity : ComponentActivity() {
         }
         AmazonCredentialStore.clear(this)
         refreshView()
-        Toast.makeText(this, "Signed out of Amazon Games", Toast.LENGTH_SHORT).show()
+        resultBarMsg = "Signed out of Amazon Games"
     }
 }
 

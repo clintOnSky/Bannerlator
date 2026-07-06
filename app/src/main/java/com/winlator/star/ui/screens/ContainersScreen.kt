@@ -3,6 +3,7 @@ package com.winlator.star.ui.screens
 import android.app.Activity
 import android.content.Intent
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,9 +13,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -31,10 +35,12 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SettingsBackupRestore
 import java.io.File
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -51,6 +57,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,7 +66,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -67,16 +77,26 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material3.Surface
 import com.winlator.star.R
 import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.XrActivity
 import com.winlator.star.container.Container
+import com.winlator.star.container.Shortcut
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.core.FileUtils
+import com.winlator.star.core.GameSaveBackup
+import com.winlator.star.core.SaveLocator
 import com.winlator.star.core.StringUtils
+import com.winlator.star.store.UninstallResultBar
 import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.winlator.star.ui.theme.OnSurface
 import com.winlator.star.ui.theme.OnSurfaceVariant
 import com.winlator.star.ui.theme.SurfaceVariant as SurfaceVariantColor
@@ -115,6 +135,24 @@ fun ContainersScreen(
     var confirmDialog by remember { mutableStateOf<ConfirmAction?>(null) }
     var storageInfoContainer by remember { mutableStateOf<Container?>(null) }
     var showImportPicker by remember { mutableStateOf(false) }
+
+    // Backup / Restore game save flow (see SaveFlow). The engine posts its result on the main
+    // thread, so we just flip these bits of Compose state as the flow advances.
+    var saveFlow by remember { mutableStateOf<SaveFlow?>(null) }
+    var busyMessage by remember { mutableStateOf<String?>(null) }
+    var resultMessage by remember { mutableStateOf<String?>(null) }
+    var pendingRestoreContainer by remember { mutableStateOf<Container?>(null) }
+
+    // SAF picker for choosing a GameHub backup .zip to restore.
+    val restorePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        val target = pendingRestoreContainer
+        pendingRestoreContainer = null
+        if (uri != null && target != null) {
+            saveFlow = SaveFlow.Confirm(target, uri, GameSaveBackup.gameNameFromUri(context, uri))
+        }
+    }
 
     val topBarActions = LocalTopBarActions.current
     // LaunchedEffect — not SideEffect — so this runs in the same dispatcher queue as
@@ -167,6 +205,7 @@ fun ContainersScreen(
                             }
                         },
                         onInfo = { storageInfoContainer = container },
+                        onBackupRestore = { saveFlow = SaveFlow.Fork(container) },
                     )
                 }
             }
@@ -195,6 +234,13 @@ fun ContainersScreen(
             ) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             }
+        }
+
+        // Themed, auto-dismissing result bar for the backup/restore flow (avoids the
+        // black-box system Toast on this ROM). Lives inside this full-screen Box so it
+        // overlays the list at the bottom.
+        resultMessage?.let { msg ->
+            UninstallResultBar(message = msg, onTimeout = { resultMessage = null })
         }
         } // end inner Box(weight)
     } // end Column
@@ -274,6 +320,155 @@ fun ContainersScreen(
     storageInfoContainer?.let { container ->
         StorageInfoDialog(container = container, onDismiss = { storageInfoContainer = null })
     }
+
+    // ---- Backup / Restore game save flow ----
+    when (val flow = saveFlow) {
+        null -> {}
+        is SaveFlow.Fork -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text("Game saves") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text(flow.container.name, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.size(8.dp))
+                    SaveFlowCaution()
+                    Spacer(Modifier.size(8.dp))
+                    TextButton(onClick = { saveFlow = SaveFlow.BackupScope(flow.container) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Back up this save", modifier = Modifier.weight(1f))
+                    }
+                    TextButton(onClick = { saveFlow = SaveFlow.RestoreSource(flow.container) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Restore a save", modifier = Modifier.weight(1f))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { saveFlow = null }) { Text("Cancel") } },
+        )
+        is SaveFlow.RestoreSource -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text("Restore a save") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("Choose the backup source.", color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.size(8.dp))
+                    TextButton(
+                        onClick = {
+                            pendingRestoreContainer = flow.container
+                            saveFlow = null
+                            restorePickerLauncher.launch("application/zip")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("GameHub backup (.zip)", modifier = Modifier.weight(1f)) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { saveFlow = SaveFlow.Fork(flow.container) }) { Text("Back") } },
+        )
+        is SaveFlow.Confirm -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text("Restore game save?") },
+            text = {
+                Text(
+                    "Restore the GameHub backup of \"${flow.gameName}\" into container " +
+                        "\"${flow.container.name}\"?\n\nThis may overwrite existing save data."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val c = flow.container
+                    val uri = flow.uri
+                    val name = flow.gameName
+                    saveFlow = null
+                    busyMessage = "Restoring $name…"
+                    GameSaveBackup.restore(context, uri, c) { r ->
+                        busyMessage = null
+                        resultMessage = if (r.ok) "Restored ${r.filesWritten} files to \"${c.name}\""
+                        else "Restore failed: ${r.error ?: "unknown error"}"
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { saveFlow = null }) { Text("Cancel") } },
+        )
+        is SaveFlow.BackupScope -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text(stringResource(R.string.save_backup_scope_title)) },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text(stringResource(R.string.save_backup_scope_prompt), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.size(8.dp))
+                    TextButton(
+                        onClick = { saveFlow = SaveFlow.BackupFormat(flow.container, null, flow.container.name) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.save_backup_scope_whole), modifier = Modifier.weight(1f)) }
+                    TextButton(
+                        onClick = { saveFlow = SaveFlow.GamePicker(flow.container) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("${stringResource(R.string.save_backup_scope_game)} ▸", modifier = Modifier.weight(1f)) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { saveFlow = SaveFlow.Fork(flow.container) }) { Text("Back") } },
+        )
+        is SaveFlow.GamePicker -> {
+            val shortcuts = remember(flow.container.id) { vm.shortcutsFor(flow.container) }
+            AlertDialog(
+                onDismissRequest = { saveFlow = null },
+                title = { Text(stringResource(R.string.save_backup_pick_game_title)) },
+                text = {
+                    if (shortcuts.isEmpty()) {
+                        Text(stringResource(R.string.save_backup_pick_game_empty), color = OnSurfaceVariant)
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+                            items(shortcuts, key = { it.file.path }) { sc ->
+                                GamePickerRow(sc) {
+                                    saveFlow = SaveFlow.GameSaves(
+                                        container = flow.container,
+                                        gameName = sc.name,
+                                        gameKey = SaveLocator.gameKey(sc.wmClass, sc.file.name),
+                                        exePath = sc.path ?: "",
+                                        wmClass = sc.wmClass ?: "",
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { saveFlow = SaveFlow.BackupScope(flow.container) }) { Text("Back") } },
+            )
+        }
+        is SaveFlow.GameSaves -> GameSavesDialog(
+            container = flow.container,
+            gameName = flow.gameName,
+            gameKey = flow.gameKey,
+            exePath = flow.exePath,
+            wmClass = flow.wmClass,
+            onBack = { saveFlow = SaveFlow.GamePicker(flow.container) },
+            onCancel = { saveFlow = null },
+            onNext = { roots ->
+                saveFlow = SaveFlow.BackupFormat(flow.container, roots, flow.gameName)
+            },
+        )
+        is SaveFlow.BackupFormat -> AlertDialog(
+            onDismissRequest = { saveFlow = null },
+            title = { Text(stringResource(R.string.save_backup_format_title)) },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text(stringResource(R.string.save_backup_format_prompt), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.size(8.dp))
+                    BackupFormatOption(
+                        title = stringResource(R.string.save_backup_format_gamehub),
+                        subtitle = stringResource(R.string.save_backup_format_gamehub_sub),
+                    ) { runScopedBackup(context, flow, GameSaveBackup.BackupLayout.GAMEHUB, { saveFlow = null }, { busyMessage = it }, { resultMessage = it }) }
+                    BackupFormatOption(
+                        title = stringResource(R.string.save_backup_format_winlator),
+                        subtitle = stringResource(R.string.save_backup_format_winlator_sub),
+                    ) { runScopedBackup(context, flow, GameSaveBackup.BackupLayout.WINLATOR, { saveFlow = null }, { busyMessage = it }, { resultMessage = it }) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { saveFlow = SaveFlow.BackupScope(flow.container) }) { Text("Back") }
+            },
+        )
+    }
+
+    busyMessage?.let { SaveFlowProgressDialog(message = it) }
 }
 
 @Composable
@@ -285,6 +480,7 @@ private fun ContainerItem(
     onRemove: () -> Unit,
     onExport: () -> Unit,
     onInfo: () -> Unit,
+    onBackupRestore: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -419,6 +615,11 @@ private fun ContainerItem(
                         onClick = { menuExpanded = false; onExport() },
                     )
                     DropdownMenuItem(
+                        text = { Text("Backup / Restore save") },
+                        leadingIcon = { Icon(Icons.Filled.SettingsBackupRestore, null) },
+                        onClick = { menuExpanded = false; onBackupRestore() },
+                    )
+                    DropdownMenuItem(
                         text = { Text("Info") },
                         leadingIcon = { Icon(Icons.Filled.Info, null) },
                         onClick = { menuExpanded = false; onInfo() },
@@ -432,6 +633,357 @@ private fun ContainerItem(
 private sealed class ConfirmAction {
     data class Duplicate(val container: Container) : ConfirmAction()
     data class Remove(val container: Container) : ConfirmAction()
+}
+
+/** Steps of the Backup / Restore game-save flow launched from a container's overflow menu. */
+private sealed class SaveFlow {
+    /** Direction picker: back up vs restore. */
+    data class Fork(val container: Container) : SaveFlow()
+    /** Back up → scope picker: whole container vs a specific game. */
+    data class BackupScope(val container: Container) : SaveFlow()
+    /** Back up → pick which installed game to scope to. */
+    data class GamePicker(val container: Container) : SaveFlow()
+    /** Back up → discover + confirm the chosen game's save folders. */
+    data class GameSaves(
+        val container: Container,
+        val gameName: String,
+        val gameKey: String,
+        val exePath: String,
+        val wmClass: String,
+    ) : SaveFlow()
+    /** Restore → choose a backup source (GameHub backup today; more later). */
+    data class RestoreSource(val container: Container) : SaveFlow()
+    /** Restore → a .zip has been picked; confirm before overwriting. */
+    data class Confirm(val container: Container, val uri: android.net.Uri, val gameName: String) : SaveFlow()
+    /**
+     * Back up → choose the output layout. [roots] == null is a whole-container backup; otherwise
+     * the profile-relative subtrees to include. [gameName] names the resulting zip.
+     */
+    data class BackupFormat(
+        val container: Container,
+        val roots: List<String>?,
+        val gameName: String?,
+    ) : SaveFlow()
+}
+
+/** Fires a scoped (or whole-container) backup off the UI thread and routes the result to the bars. */
+private fun runScopedBackup(
+    context: android.content.Context,
+    flow: SaveFlow.BackupFormat,
+    layout: GameSaveBackup.BackupLayout,
+    dismiss: () -> Unit,
+    setBusy: (String?) -> Unit,
+    setResult: (String?) -> Unit,
+) {
+    val name = flow.gameName ?: flow.container.name
+    dismiss()
+    setBusy("Backing up $name…")
+    GameSaveBackup.backup(context, flow.container, flow.roots, flow.gameName, layout) { r ->
+        setBusy(null)
+        setResult(
+            if (r.ok) "Saved ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
+            else "Backup failed: ${r.error ?: "unknown error"}"
+        )
+    }
+}
+
+/** One selectable row in the game picker: cover art (fallback icon) + game name. */
+@Composable
+private fun GamePickerRow(shortcut: Shortcut, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val cover = shortcut.coverArt ?: shortcut.icon
+        Box(
+            modifier = Modifier
+                .size(width = 36.dp, height = 48.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(SurfaceVariantColor),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (cover != null) {
+                Image(
+                    bitmap = cover.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.icon_wine),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+        Text(
+            shortcut.name,
+            color = OnSurface,
+            modifier = Modifier.padding(start = 12.dp).weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** A two-line format option in the BackupFormat dialog. */
+@Composable
+private fun BackupFormatOption(title: String, subtitle: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+    ) {
+        Text(title, color = MaterialTheme.colorScheme.primary)
+        Text(subtitle, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/**
+ * Discover → confirm for a single game. On enter it either restores the remembered folder set from
+ * the sidecar (pre-ticked, skip discovery) or scans the container for candidates. The user ticks
+ * folders, can add one manually (browser rooted at the xuser profile, escape-guarded), and on Next
+ * the selection is persisted to the sidecar and handed to the format step.
+ */
+@Composable
+private fun GameSavesDialog(
+    container: Container,
+    gameName: String,
+    gameKey: String,
+    exePath: String,
+    wmClass: String,
+    onBack: () -> Unit,
+    onCancel: () -> Unit,
+    onNext: (List<String>) -> Unit,
+) {
+    val rows = remember(gameKey) { mutableStateListOf<SaveLocator.Candidate>() }
+    val checked = remember(gameKey) { mutableStateListOf<String>() }
+    var loading by remember(gameKey) { mutableStateOf(true) }
+    var fromSidecar by remember(gameKey) { mutableStateOf(false) }
+    var rescan by remember(gameKey) { mutableStateOf(0) }
+    var showManualAdd by remember(gameKey) { mutableStateOf(false) }
+    var escapeError by remember(gameKey) { mutableStateOf(false) }
+
+    LaunchedEffect(gameKey, rescan) {
+        loading = true
+        val (list, sidecar) = withContext(Dispatchers.IO) {
+            val saved = if (rescan == 0) SaveLocator.loadMap(container, gameKey) else null
+            if (saved != null && saved.roots.isNotEmpty()) {
+                saved.roots.map { rel ->
+                    SaveLocator.Candidate(rel, rel.substringAfterLast('/'), 100, SaveLocator.sizeOf(container, rel))
+                } to true
+            } else {
+                SaveLocator.discover(container, gameName, exePath, wmClass) to false
+            }
+        }
+        rows.clear(); rows.addAll(list)
+        checked.clear(); checked.addAll(list.map { it.relPath })
+        fromSidecar = sidecar
+        loading = false
+    }
+
+    if (loading) {
+        SaveFlowProgressDialog(message = stringResource(R.string.save_backup_discovering))
+        return
+    }
+
+    if (showManualAdd) {
+        ManualAddDialog(
+            container = container,
+            onCancel = { showManualAdd = false },
+            onPick = { dir ->
+                showManualAdd = false
+                val rel = SaveLocator.relativizeUnderProfile(container, dir)
+                if (rel == null) {
+                    escapeError = true
+                } else {
+                    escapeError = false
+                    if (rows.none { it.relPath == rel }) {
+                        rows.add(SaveLocator.Candidate(rel, dir.name, 100, SaveLocator.sizeOf(container, rel)))
+                    }
+                    if (!checked.contains(rel)) checked.add(rel)
+                }
+            },
+        )
+    }
+
+    // Warn if any two ticked folders are nested (manual add can create that; shared subtree copied once).
+    val overlap = checked.any { a -> checked.any { b -> a != b && (a.startsWith("$b/")) } }
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(gameName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    stringResource(
+                        when {
+                            rows.isEmpty() -> R.string.save_backup_confirm_none
+                            fromSidecar -> R.string.save_backup_confirm_remembered
+                            else -> R.string.save_backup_confirm_prompt
+                        }
+                    ),
+                    color = OnSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.size(4.dp))
+                rows.forEach { c ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                if (checked.contains(c.relPath)) checked.remove(c.relPath) else checked.add(c.relPath)
+                            }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = checked.contains(c.relPath),
+                            onCheckedChange = {
+                                if (it) { if (!checked.contains(c.relPath)) checked.add(c.relPath) }
+                                else checked.remove(c.relPath)
+                            },
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(c.relPath, color = OnSurface, style = MaterialTheme.typography.bodyMedium)
+                            Text(StringUtils.formatBytes(c.sizeBytes), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                if (escapeError) {
+                    Text(stringResource(R.string.save_backup_add_folder_escape), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                if (overlap) {
+                    Text(stringResource(R.string.save_backup_overlap_note), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.size(4.dp))
+                Row {
+                    TextButton(onClick = { showManualAdd = true }) { Text(stringResource(R.string.save_backup_add_folder)) }
+                    if (fromSidecar) {
+                        TextButton(onClick = { rescan += 1 }) { Text(stringResource(R.string.save_backup_rescan)) }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = checked.isNotEmpty(),
+                onClick = {
+                    val roots = checked.toList()
+                    // Persist the taught mapping off the UI thread, then advance to the format step.
+                    Thread { SaveLocator.saveMap(container, gameKey, gameName, roots) }.start()
+                    onNext(roots)
+                },
+            ) { Text(stringResource(R.string.save_backup_next)) }
+        },
+        dismissButton = { TextButton(onClick = onBack) { Text("Back") } },
+    )
+}
+
+/**
+ * Minimal in-app folder browser rooted at the container's xuser profile. Used for "add folder…"
+ * because SAF can't enumerate the app-private internal storage where container profiles live; the
+ * root confinement makes an escape impossible by construction (and the caller re-checks anyway).
+ */
+@Composable
+private fun ManualAddDialog(container: Container, onPick: (File) -> Unit, onCancel: () -> Unit) {
+    val root = remember(container.id) { SaveLocator.profileDir(container) }
+    var cur by remember(container.id) { mutableStateOf(root) }
+    val subDirs = remember(cur.path) {
+        cur.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name.lowercase() } ?: emptyList()
+    }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.save_backup_add_folder_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 380.dp)) {
+                Text(
+                    "…/" + (if (cur.path == root.path) "" else cur.relativeTo(root).path.replace(File.separatorChar, '/')),
+                    color = OnSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.size(6.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                    if (cur.path != root.path) {
+                        item {
+                            TextButton(onClick = { cur.parentFile?.let { cur = it } }, modifier = Modifier.fillMaxWidth()) {
+                                Text("..", modifier = Modifier.weight(1f), color = OnSurface)
+                            }
+                        }
+                    }
+                    items(subDirs, key = { it.path }) { d ->
+                        TextButton(onClick = { cur = d }, modifier = Modifier.fillMaxWidth()) {
+                            Text(d.name, modifier = Modifier.weight(1f), color = OnSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = cur.path != root.path, onClick = { onPick(cur) }) {
+                Text(stringResource(R.string.save_backup_add_folder_here))
+            }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Caution shown on the Backup/Restore fork: save handling is not exhaustive (some games write
+ * saves outside the folders we scan) so users should verify a backup before wiping originals.
+ */
+@Composable
+private fun SaveFlowCaution() {
+    // Translucent accent tint (not an opaque fill) so it composits over the dialog's own
+    // surface and reads as part of the theme instead of a black slab.
+    val accent = MaterialTheme.colorScheme.primary
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = accent.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.40f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+                text = "⚠  " + stringResource(R.string.save_flow_caution_title),
+                color = OnSurface,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.size(4.dp))
+            Text(
+                text = stringResource(R.string.save_flow_caution_body),
+                color = OnSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+/** Blocking, non-dismissable spinner shown while a backup/restore runs off the UI thread. */
+@Composable
+private fun SaveFlowProgressDialog(message: String) {
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+    ) {
+        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+            Row(modifier = Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 20.dp),
+                )
+            }
+        }
+    }
 }
 
 @Composable

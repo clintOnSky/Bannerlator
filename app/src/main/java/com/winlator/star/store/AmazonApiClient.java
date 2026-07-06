@@ -291,13 +291,13 @@ public class AmazonApiClient {
             conn.disconnect();
 
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "HTTP " + code + " from " + urlStr + ": " + resp);
+                Log.e(TAG, "HTTP " + code + " from " + StoreLog.redactUrl(urlStr) + " (error body suppressed)");
                 return null;
             }
             return resp;
 
         } catch (Exception e) {
-            Log.e(TAG, "postGaming failed: " + urlStr, e);
+            Log.e(TAG, "postGaming failed: " + StoreLog.redactUrl(urlStr) + " (" + e.getClass().getSimpleName() + ")");
             return null;
         }
     }
@@ -315,7 +315,7 @@ public class AmazonApiClient {
 
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "getBytes HTTP " + code + " from " + urlStr);
+                Log.e(TAG, "getBytes HTTP " + code + " from " + StoreLog.redactUrl(urlStr));
                 conn.disconnect();
                 return null;
             }
@@ -323,7 +323,7 @@ public class AmazonApiClient {
             conn.disconnect();
             return data;
         } catch (Exception e) {
-            Log.e(TAG, "getBytes failed: " + urlStr, e);
+            Log.e(TAG, "getBytes failed: " + StoreLog.redactUrl(urlStr) + " (" + e.getClass().getSimpleName() + ")");
             return null;
         }
     }

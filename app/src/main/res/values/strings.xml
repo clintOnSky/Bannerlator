@@ -684,6 +684,34 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="active_windows">Active Windows</string>
     <string name="contact_us">Help and Support</string>
     <string name="graphics_driver_show_incompatible">Show incompatible drivers</string>
+
+    <!-- Per-game save backup -->
+    <string name="save_flow_caution_title">Not foolproof yet — verify before you wipe anything</string>
+    <string name="save_flow_caution_body">Some games keep saves outside the folders we back up (the game\'s install directory, the Windows registry, or Steam Cloud), so a backup may not capture everything. Always double-check a backup — or copy the files yourself — and test that a restore works before deleting your original saves.</string>
+    <string name="save_backup_scope_title">Back up this save</string>
+    <string name="save_backup_scope_prompt">What do you want to back up?</string>
+    <string name="save_backup_scope_whole">All game saves (whole profile)</string>
+    <string name="save_backup_scope_game">A specific game</string>
+    <string name="save_backup_pick_game_title">Pick a game</string>
+    <string name="save_backup_pick_game_empty">No games found in this container.</string>
+    <string name="save_backup_discovering">Looking for save folders…</string>
+    <string name="save_backup_confirm_title">Choose save folders</string>
+    <string name="save_backup_confirm_prompt">Tick the folders to include in the backup.</string>
+    <string name="save_backup_confirm_none">No save folders were detected. Add one manually below.</string>
+    <string name="save_backup_confirm_remembered">Remembered from your last backup. Re-scan to look again.</string>
+    <string name="save_backup_add_folder">Add folder…</string>
+    <string name="save_backup_rescan">Re-scan</string>
+    <string name="save_backup_overlap_note">Some selected folders overlap; shared files are backed up once.</string>
+    <string name="save_backup_add_folder_title">Add a save folder</string>
+    <string name="save_backup_add_folder_here">Use this folder</string>
+    <string name="save_backup_add_folder_escape">That folder is outside this game\'s profile.</string>
+    <string name="save_backup_format_title">Backup format</string>
+    <string name="save_backup_format_prompt">Which tool is this backup for?</string>
+    <string name="save_backup_format_gamehub">GameHub-compatible .zip</string>
+    <string name="save_backup_format_gamehub_sub">GameHub, Proton-based tools (default)</string>
+    <string name="save_backup_format_winlator">Winlator-native .zip</string>
+    <string name="save_backup_format_winlator_sub">Sibling Winlator / WinNative builds</string>
+    <string name="save_backup_next">Next</string>
 </resources>
 
 
