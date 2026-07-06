@@ -1,5 +1,20 @@
 # Star-Compose — Progress Log
 
+## 2026-07-05 — ✅ CHECKPOINT: issues session — magnifier MERGED, scrape-cover MERGED, wallpaper in-flight
+
+> **State of main = `0df8984`.** Merged to main THIS session (all clean FF, NO release cut, still vc37/2.2.2):
+> - **`53f528a`** — Save Backup/Restore + "not foolproof" caution advisory (caution card made theme-fluid after a black-slab bug).
+> - **`087a8ca`** — `fix(shortcuts)`: **Scrape cover** now in the LIST-view overflow menu too (was grid-only; shared `scrapeCoverFor()` lambda).
+> - **`36b1962` + `0df8984`** — `fix(vulkan)`: **magnifier follows the cursor** (issue #44), fullscreen THEN windowed. GL applies cursor-follow with no fullscreen gate; Vulkan only had fullscreen, so windowed containers didn't track. Guest-space `magOff` composed with the scene transform. **BOTH device-proven on Adreno.** Issue #44 commented + CLOSED (ships in 2.4-preN). Known limitation left: nativeMode direct-scanout magnify (documented, not fixed). Detail: memory `project_bannerlator_vulkan_magnifier_cursor`.
+>
+> **🖼️ IN-FLIGHT — branch `fix/container-wallpaper-picker` (issue #66), rebased ONTO main `0df8984` (clean, no overlap w/ magnifier's VulkanRenderer.java):**
+> - `e256b7c` picker (Image bg had no picker — Compose `GetContent()` + preview) — **device-proven** (user: "picker works").
+> - `d106bf8` per-container vs global scope (`BackgroundScope{GLOBAL,CONTAINER}`, back-compat theme str, "Apply wallpaper to" dropdown).
+> - `8973700` **the real bug**: "global" was NOT global. `ImageFs.CONFIG_PATH=/home/xuser/.config` and `home/xuser` is the PER-CONTAINER symlink → the wallpaper saved under whatever container was active during editing (device proof: only 2/3 containers had the file). Fix = **relocate sources to fixed non-symlinked `home/.wallpapers/`** + **launch-time staleness gate** (`wallpaperNeedsRegen`: regen bmp when source newer than `CACHE_PATH/wallpaper.bmp`) OR-ed into `XServerDisplayActivity:1857`. ⚠️ Migration: old wallpapers orphaned → containers show DEFAULT until user re-picks global once.
+> - **CI `28762849516` (headSha `8973700`) building.** Scope + propagation NOT yet device-tested. On device-proof → already-rebased → clean FF to main (magnifier preserved as base) → close #66. Detail: memory `project_bannerlator_container_wallpaper`.
+>
+> **Staged APKs (all this session):** magnifier fullscreen `bannerlator-magnifier-cursor-36b1962`, magnifier windowed `bannerlator-magnifier-windowed-0df8984` (sha `a8709b6e…`), wallpaper `bannerlator-wallpaper-scope-c7ad800` (superseded by the 8973700 build once green).
+
 > **🗄️ CHECKPOINT (2026-07-05) — branch `feat/save-backup-restore`: PER-GAME SAVE BACKUP built + CI-green + staged (NOT device-tested).**
 > Iteration 2 on top of shipped v1 container-scoped Backup/Restore (`bc7d4dc` + phantom-shortcut fix `a8ddf7d`, restore device-proven).
 > **What shipped this session (2 commits):**
