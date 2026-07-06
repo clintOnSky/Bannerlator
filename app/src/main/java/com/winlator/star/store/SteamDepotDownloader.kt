@@ -348,18 +348,29 @@ object SteamDepotDownloader {
         // (the b8e9e5b grow-the-denominator band-aid then only ever acts as a backstop). Fall back to
         // the PICS estimate, then to the per-depot PICS sum. A resolved real size counts as hasPicsSize
         // (a valid known total → no need to back-calculate from chunk fractions).
+        // Exclusion-aware denominators: sum only the depots this download will actually pull (drop the
+        // DLC the user opted out of) so the progress bar tracks the real, reduced download instead of
+        // stalling at ~85% then jumping to done.
+        val excludedForDenom = try { SteamPrefs.getExcludedDlc(appId) } catch (_: Throwable) { emptySet() }
+        val keptDepotRows = try { db.getDepotManifests(appId).filter { it.depotId !in excludedForDenom } }
+                            catch (_: Throwable) { emptyList() }
+        val keptReal = if (keptDepotRows.isNotEmpty() && keptDepotRows.all { it.realSizeBytes > 0L })
+                           keptDepotRows.sumOf { it.realSizeBytes } else 0L
+        val keptPics = keptDepotRows.sumOf { it.sizeBytes }
         val realGameSize = try { db.getGameRealSize(appId) } catch (_: Throwable) { 0L }
         val hasPicsSize: Boolean
         val installTotal: Long = when {
-            realGameSize  > 0L -> { hasPicsSize = true;  realGameSize }
+            keptReal > 0L      -> { hasPicsSize = true;  keptReal }          // manifest-true, exclusion-aware
+            keptPics > 0L      -> { hasPicsSize = true;  keptPics }          // PICS sum, exclusion-aware
+            realGameSize  > 0L -> { hasPicsSize = true;  realGameSize }      // fallbacks (no depot rows)
             row.sizeBytes > 0L -> { hasPicsSize = true;  row.sizeBytes }
-            else               -> { hasPicsSize = false
-                db.getDepotManifests(appId).sumOf { it.sizeBytes }.let { if (it > 0L) it else 1L } }
+            else               -> { hasPicsSize = false; 1L }
         }
-        // Compressed (network) total for the download bar. In-memory cache populated by
-        // library sync; on a cache miss (resume in a fresh process without a re-sync) fall
-        // back to the install total so the bar still has a sane denominator.
-        val cachedDownload = repo.getSelectedDownloadSize(appId)
+        // Compressed (network) total for the download bar: kept depots' resolved compressed sizes when
+        // available (exclusion-aware), else the app-level PICS download cache, else the install total.
+        val keptDownload = if (keptDepotRows.isNotEmpty() && keptDepotRows.all { it.realDownloadBytes > 0L })
+                               keptDepotRows.sumOf { it.realDownloadBytes } else 0L
+        val cachedDownload = if (keptDownload > 0L) keptDownload else repo.getSelectedDownloadSize(appId)
         val downloadTotalSeed: Long = if (cachedDownload > 0L) cachedDownload else installTotal
         dlog("Denominators: install=${fmtSize(installTotal)} download=${fmtSize(downloadTotalSeed)} " +
                 "(hasPicsSize=$hasPicsSize, cachedDownload=$cachedDownload)")
@@ -580,9 +591,19 @@ object SteamDepotDownloader {
                 // fall back to the PICS estimate only when the real size is UNRESOLVED — and even then
                 // we relax, never tighten: if every selected depot delivered bytes (no skipped depot),
                 // trust the engine's completion rather than reject on the unreliable PICS number.
-                val realExpected = try {
-                    DepotSizeResolver.cached(appId)?.takeIf { it.complete && it.realInstallBytes > 0L }?.realInstallBytes
-                } catch (_: Throwable) { null }
+                // Honour DLC opt-outs: judge completion against ONLY the depots this download actually
+                // pulled. Excluded DLC depots aren't fetched, so they must not count toward the expected
+                // size or the "every depot delivered" check — otherwise opting out of DLC would falsely
+                // fail an otherwise-complete install (self-inflicted version of the See No Evil bug).
+                val excluded = try { SteamPrefs.getExcludedDlc(appId) } catch (_: Throwable) { emptySet() }
+                val keptRows = try { db.getDepotManifests(appId).filter { it.depotId !in excluded } }
+                               catch (_: Throwable) { emptyList() }
+                // Manifest-true expected = sum of KEPT depots' real sizes, only when every kept depot
+                // resolved. (Replaces DepotSizeResolver.cached() which sums ALL selected depots.)
+                val realExpected: Long? =
+                    if (keptRows.isNotEmpty() && keptRows.all { it.realSizeBytes > 0L })
+                        keptRows.sumOf { it.realSizeBytes }.takeIf { it > 0L }
+                    else null
 
                 if (realExpected != null) {
                     // True size known → authoritative 90% check. 313830 → 130/130 passes; a real skip
@@ -594,23 +615,26 @@ object SteamDepotDownloader {
                         return
                     }
                     dlog("Complete: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true (≥90%)")
-                } else if (iTotal > 0L && finalInstall < (iTotal * 90L / 100L)) {
-                    // Real size unresolved → today's PICS guard, RELAXED (never stricter): a genuine
-                    // truncation skips a whole depot, which shows up as a SELECTED depot with zero bytes
-                    // delivered. If every selected depot delivered something, the shortfall vs the PICS
-                    // estimate is a PICS over-report, not a skip — trust the engine's completion.
-                    val selectedDepots: List<Int> = try { db.getDepotManifests(appId).map { it.depotId } }
-                                         catch (_: Throwable) { emptyList() }
-                    val everyDepotDelivered = selectedDepots.isNotEmpty() &&
-                            selectedDepots.all { (installByDepot[it] ?: 0L) > 0L }
-                    if (!everyDepotDelivered) {
-                        dlog("INCOMPLETE: only ${fmtSize(finalInstall)} of ${fmtSize(iTotal)} PICS-est on disk " +
-                                "(<90%) and a selected depot delivered nothing — refusing to mark installed")
-                        emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(iTotal)}) — please retry")
-                        return
+                } else {
+                    // Real size unresolved → PICS guard, RELAXED (never stricter): a genuine truncation
+                    // skips a whole depot, showing up as a KEPT depot with zero bytes delivered. If every
+                    // kept depot delivered something, the shortfall vs the PICS estimate is a PICS
+                    // over-report, not a skip — trust the engine's completion. Expected uses KEPT depots'
+                    // PICS sizes (exclusion-aware), falling back to the running total if unavailable.
+                    val picsExpected = keptRows.sumOf { it.sizeBytes }.takeIf { it > 0L } ?: iTotal
+                    if (picsExpected > 0L && finalInstall < (picsExpected * 90L / 100L)) {
+                        val selectedDepots: List<Int> = keptRows.map { it.depotId }
+                        val everyDepotDelivered = selectedDepots.isNotEmpty() &&
+                                selectedDepots.all { (installByDepot[it] ?: 0L) > 0L }
+                        if (!everyDepotDelivered) {
+                            dlog("INCOMPLETE: only ${fmtSize(finalInstall)} of ${fmtSize(picsExpected)} PICS-est on disk " +
+                                    "(<90%) and a selected depot delivered nothing — refusing to mark installed")
+                            emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(picsExpected)}) — please retry")
+                            return
+                        }
+                        dlog("Complete: ${fmtSize(finalInstall)} < 90% of PICS-est ${fmtSize(picsExpected)} but all " +
+                                "${selectedDepots.size} kept depot(s) delivered — trusting completion (PICS over-report)")
                     }
-                    dlog("Complete: ${fmtSize(finalInstall)} < 90% of PICS-est ${fmtSize(iTotal)} but all " +
-                            "${selectedDepots.size} selected depot(s) delivered — trusting completion (PICS over-report)")
                 }
 
                 // Both bars reach 100% before switching to installed state.
