@@ -1,5 +1,18 @@
 # Star-Compose — Progress Log
 
+## 2026-07-06 — ✅ MERGED TO MAIN: DepotSizeResolver — true sizes + executor fix + detail-page size breakdown (main `38cc00b`)
+
+> **Fast-forwarded `feat/depot-size-resolver` onto main (`9f5bf74`→`38cc00b`), CI run `28797042366`. No release cut, versionCode still 38 (=2.3); next stable = 2.4-preN (vc39+).** Five commits, all device-proven except where noted:
+> - **`26f22f5`** DepotSizeResolver — fetches TRUE depot sizes from the CDN manifest (no depot key/auth token) → the install-completion guard compares written bytes vs manifest-true instead of the over/under-reporting PICS estimate. Device-proven: two full downloads (Brawlhalla 291550, "the static speaks my name" 387860) completed, guard logged `Complete: 64.1 MB of 67.8 MB manifest-true (≥90%)`, zero false "incomplete".
+> - **`d3fc902`** fix: don't `cdn.close()` the shared OkHttpClient — closing it shut down the dispatcher executor the real downloader reuses → every download hung at 0% with `executor rejected` (device-repro Brawlhalla; fixed + device-proven).
+> - **`0b70e7b`** detail-page size breakdown: headline on-disk FOOTPRINT (block-rounded per-file estimate; real measured `du` once installed) + `Download` (compressed) + `PICS estimate (Steam)` (labeled) + `Free space`/"won't fit". DB **v4→v5** additive `real_disk_bytes`. Also adds `SteamDatabase.onDowngrade` (rebuild-not-throw) — fixes the v→older rollback crash that bricked the Steam screen.
+> - **`4e153f9`** backfill footprint for games resolved pre-v5.
+> - **`38cc00b`** fix: footprint skipped EVERY file — `FileData.linkTarget` is a protobuf string (`""`, never null) for regular files, so `!= null` skipped all → fell back to content size; use `isNullOrEmpty()`. DB **v5→v6** zeros the bad values to force recompute. Device-DB-proven (HL2 depot 234 3175→4096 rounded).
+>
+> **Footprint reality (user-accepted "best it's going to get"):** for HL2 the block-rounding adds only ~5.6 MB (HL2 packs assets into big .vpk files → ~2800 large files, minimal block slack) → headline stays ~8.4 GB. The ~10.6 GB seen on disk before = INSTALL-TIME OVERHEAD (download staging / Wine prefix / Goldberg emu) OUTSIDE the manifest, unpredictable pre-install. Pre-install shows honest content estimate; post-install shows real `du`. Meaningful gap only for many-small-file games.
+>
+> **STILL OPEN (not blocking merge):** the ORIGINAL Greyfox (appId **341310**, one word — NOT 313830=See No Evil) over-report install-blocker never reproduced on device. GameNative lead: their same-class bug (#928 Black Desert 791GB vs 93) is DEPOT OVER-INCLUSION (unlicensed region/platform + systemDefined depots), so Greyfox may be a depot-SELECTION issue, not per-depot sizing. Installed-`du` footprint path also not yet device-verified (HL2 not installed).
+
 ## 2026-07-06 — ✅ CHECKPOINT (pre-reboot): DepotSizeResolver green + INSTALLED + PARTIAL device-test; install-blocker not yet reproduced
 
 > **Resolver APK `1f262e3` (CI `28784305760` GREEN) STAGED + INSTALLED + verified** (installed base.apk sha256 = `6f47720791a02e5164547e14d2677ea2c35922043ac544724ea8d70d496d10d4` = `bannerlator-depotsize-1f262e3-standard.apk`, 589,648,938 B). branch `feat/depot-size-resolver`, NOT merged, no version change.
