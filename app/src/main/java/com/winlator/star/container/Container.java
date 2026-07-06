@@ -64,7 +64,15 @@ public class Container {
     private String rendererDriverId = "system";
     private int rendererFilterMode = 0;
     private boolean rendererSwapRB = false;
-    private boolean fullscreenStretched;
+    // Fullscreen aspect-ratio mode (issue #71). Replaces the old fullscreenStretched boolean.
+    public static final int FULLSCREEN_OFF = 0;      // windowed, letterboxed (preserve aspect)
+    public static final int FULLSCREEN_FIT = 1;      // fullscreen-immersive, letterboxed (preserve aspect)
+    public static final int FULLSCREEN_STRETCH = 2;  // fullscreen-immersive, fills surface (distorts aspect)
+    // TODO(#71 stage 2): FILL (crop-to-fill, no bars) and INTEGER (integer-scaled pixel-perfect) are
+    // reserved enum values only — NOT yet rendered. Until implemented they are treated as FIT.
+    public static final int FULLSCREEN_FILL = 3;
+    public static final int FULLSCREEN_INTEGER = 4;
+    private int fullscreenMode = FULLSCREEN_OFF;
     private byte startupSelection = STARTUP_SELECTION_ESSENTIAL;
     private String cpuList;
     private String cpuListWoW64;
@@ -212,13 +220,31 @@ public class Container {
         this.controllerMapping = controllerMapping;
     }
 
-    public boolean isFullscreenStretched() { return fullscreenStretched; }
+    public int getFullscreenMode() { return fullscreenMode; }
+
+    public void setFullscreenMode(int mode) { this.fullscreenMode = mode; }
+
+    // Legacy compat: derived helper so any lingering callers still compile/behave.
+    public boolean isFullscreenStretched() { return fullscreenMode == FULLSCREEN_STRETCH; }
+
+    public void setFullscreenStretched(boolean stretched) {
+        this.fullscreenMode = stretched ? FULLSCREEN_STRETCH : FULLSCREEN_OFF;
+    }
+
+    // In-game live cycle used by the drawer toggle: OFF -> FIT -> STRETCH -> OFF.
+    // Reserved FILL/INTEGER modes fall back to OFF here (not yet rendered).
+    public static int nextFullscreenMode(int mode) {
+        switch (mode) {
+            case FULLSCREEN_OFF:     return FULLSCREEN_FIT;
+            case FULLSCREEN_FIT:     return FULLSCREEN_STRETCH;
+            case FULLSCREEN_STRETCH: return FULLSCREEN_OFF;
+            default:                 return FULLSCREEN_OFF;
+        }
+    }
 
     public boolean isShowFPS() {
         return showFPS;
     }
-
-    public void setFullscreenStretched(boolean fullscreenStretched) { this.fullscreenStretched = fullscreenStretched; }
 
     public void setShowFPS(boolean showFPS) {
         this.showFPS = showFPS;
@@ -619,7 +645,7 @@ public class Container {
             data.put("drives", drives);
             data.put("showFPS", showFPS);
             data.put("fpsCounterConfig", fpsCounterConfig);
-            data.put("fullscreenStretched", fullscreenStretched);
+            data.put("fullscreenMode", fullscreenMode);
             data.put("inputType", inputType);
             data.put("startupSelection", startupSelection);
             data.put("box64Version", box64Version);
@@ -696,8 +722,13 @@ public class Container {
                 case "fpsCounterConfig" :
                     setFPSCounterConfig(data.getString(key));
                     break;
+                case "fullscreenMode" :
+                    setFullscreenMode(data.getInt(key));
+                    break;
                 case "fullscreenStretched" :
-                    setFullscreenStretched(data.getBoolean(key));
+                    // Backward-compat migration: only honour the legacy boolean when the new int
+                    // key is absent (true -> STRETCH, false -> OFF). Saves back as fullscreenMode.
+                    if (!data.has("fullscreenMode")) setFullscreenStretched(data.getBoolean(key));
                     break;
                 case "inputType" :
                     setInputType(data.getInt(key));
