@@ -332,9 +332,13 @@ public class FrameRating extends FrameLayout implements Runnable {
                 long microAmps = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
                 int voltageMv = batteryStatus.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
                 
-                // Only show positive discharge wattage; if charging (microAmps > 0), show 0W
-                if (microAmps < 0) {
-                    batteryWattage = (Math.abs(microAmps) * voltageMv) / 1000000000.0f;
+                // Show draw magnitude regardless of the device's current-sign convention
+                // (some report discharge negative, others positive), so it isn't stuck at 0.
+                // MIN_VALUE = unsupported; small magnitude = mA-reporting unit, scale to µA.
+                if (microAmps != 0 && microAmps != Long.MIN_VALUE) {
+                    long absUa = Math.abs(microAmps);
+                    if (absUa < 10000) absUa *= 1000;
+                    batteryWattage = (absUa * voltageMv) / 1000000000.0f;
                 } else {
                     batteryWattage = 0.0f;
                 }

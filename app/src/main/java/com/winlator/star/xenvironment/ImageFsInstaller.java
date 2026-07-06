@@ -37,12 +37,35 @@ public abstract class ImageFsInstaller {
         }
     }
 
+    // The imagefs ships a build-time libjpeg.so -> libjpeg.so.8 symlink. Nothing resolves the bare
+    // "libjpeg.so" name at runtime (real consumers ask for libjpeg.so.8), but on Xiaomi/HyperOS the
+    // symlink is actively harmful: their patched libhwui.so drags /system_ext/lib64/libjpeg-hyper.so
+    // into any dlopen closure that touches libandroid.so — both frame-gen layers do, for
+    // AHardwareBuffer — and libjpeg-hyper's own "libjpeg.so" dependency then resolves (via
+    // LD_LIBRARY_PATH) to our symlinked copy, which does not export the jsimd_* SIMD symbols it
+    // needs. The failed relocation aborts the entire dlopen, so bionic-fg AND lsfg-vk silently
+    // never load on those devices ("Requested layer ... failed to load"). Dropping the symlink
+    // lets the linker fall through to Xiaomi's /system/lib64/libjpeg.so, which exports them.
+    // Only done when libjpeg-hyper is present so non-Xiaomi devices keep the imagefs untouched.
+    public static void removeLibjpegShadowIfXiaomi(ImageFs imageFs) {
+        try {
+            if (!new File("/system_ext/lib64/libjpeg-hyper.so").exists()) return;
+            File shadow = new File(imageFs.getLibDir(), "libjpeg.so");
+            if (shadow.exists() && shadow.delete()) {
+                Log.i("ImageFsInstaller", "Removed usr/lib/libjpeg.so symlink (Xiaomi libjpeg-hyper workaround)");
+            }
+        } catch (Exception e) {
+            Log.e("ImageFsInstaller", "Failed to remove libjpeg.so shadow symlink", e);
+        }
+    }
+
     // Stages the bundled bionic-fg Vulkan layer (.so + implicit-layer manifest) into imagefs so
     // frame generation / the FPS limiter work without manually copying the .so after every
     // (re)install. Idempotent: skips the .so copy when it is already present with the same size.
     // The manifest's library_path is ../../../lib/libbionic_fg.so, so it must sit in
     // usr/share/vulkan/implicit_layer.d/ with the .so in usr/lib/.
     public static void installBionicFgLayer(Context context, ImageFs imageFs) {
+        removeLibjpegShadowIfXiaomi(imageFs);
         try {
             File soDst = new File(imageFs.getLibDir(), "libbionic_fg.so");
             long assetSize = FileUtils.getSize(context, "bionic-fg/libbionic_fg.so");

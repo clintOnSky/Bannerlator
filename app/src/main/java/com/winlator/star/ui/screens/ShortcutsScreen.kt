@@ -1089,6 +1089,10 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
     var showDxvkDownloadSheet by remember { mutableStateOf(false) }
     var showVegasDownloadSheet by remember { mutableStateOf(false) }
     var showVkd3dDownloadSheet by remember { mutableStateOf(false) }
+    // Bumped by the download sheets' onContentChanged so the version lists below (and
+    // DxvkConfigDialog's internal ones) reload live — without this, a newly downloaded
+    // component only appears after closing and reopening the whole settings dialog.
+    var contentRefreshKey by remember { mutableStateOf(0) }
 
     // Tab
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -1113,8 +1117,10 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         }
     }
 
-    // Load async data
-    LaunchedEffect(Unit) {
+    // Load the Box64/FEXCore version lists. Keyed on contentRefreshKey so a download/remove in
+    // the content sheets re-scans installed profiles live; selection initialization stays in the
+    // one-shot LaunchedEffect(Unit) below so a refresh never clobbers unsaved dropdown choices.
+    LaunchedEffect(contentRefreshKey) {
         withContext(Dispatchers.IO) {
             val cm = ContentsManager(context)
             cm.syncContents()
@@ -1136,6 +1142,18 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                 fexList.add(n.substring(n.indexOf('-') + 1))
             }
 
+            withContext(Dispatchers.Main) {
+                isArm64EC = arm64ec
+                box64Versions = b64Arr
+                fexCoreVersions = fexList
+                if (selectedBox64Version.isEmpty()) selectedBox64Version = b64Arr.firstOrNull() ?: ""
+            }
+        }
+    }
+
+    // Load async data
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
             val b64Presets = Box64PresetManager.getPresets("box64", context)
             val fexPresets = FEXCorePresetManager.getPresets(context)
             val profiles = InputControlsManager(context).getProfiles(true)
@@ -1145,9 +1163,6 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             if (sfDir.exists()) sfDir.listFiles()?.forEach { midi.add(it.name) }
 
             withContext(Dispatchers.Main) {
-                isArm64EC = arm64ec
-                box64Versions = b64Arr
-                fexCoreVersions = fexList
                 box64Presets = b64Presets
                 fexCorePresets = fexPresets
                 controlsProfiles = profiles
@@ -1162,8 +1177,6 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                 val cpId = shortcut.getExtra("controlsProfile", "0").toIntOrNull() ?: 0
                 selectedControlsProfileIndex = if (cpId == 0) 0
                     else profiles.indexOfFirst { it.id == cpId }.let { if (it >= 0) it + 1 else 0 }
-
-                if (selectedBox64Version.isEmpty()) selectedBox64Version = b64Arr.firstOrNull() ?: ""
             }
         }
     }
@@ -1603,6 +1616,7 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         DxvkConfigDialog(
             isArm64EC = isArm64EC,
             isVegas = isVegasCfg,
+            refreshKey = contentRefreshKey,
             initialConfig = dxWrapperConfig,
             onConfirm = { dxWrapperConfig = it; showDxvkConfig = false },
             onDismiss = { showDxvkConfig = false },
@@ -1620,36 +1634,39 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
 
     if (showBox64DownloadSheet) {
         ContentDownloadSheet(
-            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64,
+            contentType = if (isArm64EC)
+                com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64
+            else
+                com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64,
             onDismiss = { showBox64DownloadSheet = false },
-            onContentChanged = {}
+            onContentChanged = { contentRefreshKey++ }
         )
     }
     if (showFexCoreDownloadSheet) {
         ContentDownloadSheet(
             contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
             onDismiss = { showFexCoreDownloadSheet = false },
-            onContentChanged = {}
+            onContentChanged = { contentRefreshKey++ }
         )
     }
     if (showDxvkDownloadSheet) {
         ContentDownloadSheet(
             contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_DXVK,
             onDismiss = { showDxvkDownloadSheet = false },
-            onContentChanged = {}
+            onContentChanged = { contentRefreshKey++ }
         )
     }
     if (showVkd3dDownloadSheet) {
         ContentDownloadSheet(
             contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
             onDismiss = { showVkd3dDownloadSheet = false },
-            onContentChanged = {}
+            onContentChanged = { contentRefreshKey++ }
         )
     }
     if (showVegasDownloadSheet) {
         VegasDownloadSheet(
             onDismiss = { showVegasDownloadSheet = false },
-            onContentChanged = {}
+            onContentChanged = { contentRefreshKey++ }
         )
     }
     } // settings Dialog
