@@ -686,6 +686,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="graphics_driver_show_incompatible">Show incompatible drivers</string>
 
     <!-- Per-game save backup -->
+    <string name="save_flow_caution_title">Not foolproof yet — verify before you wipe anything</string>
+    <string name="save_flow_caution_body">Some games keep saves outside the folders we back up (the game\'s install directory, the Windows registry, or Steam Cloud), so a backup may not capture everything. Always double-check a backup — or copy the files yourself — and test that a restore works before deleting your original saves.</string>
     <string name="save_backup_scope_title">Back up this save</string>
     <string name="save_backup_scope_prompt">What do you want to back up?</string>
     <string name="save_backup_scope_whole">All game saves (whole profile)</string>

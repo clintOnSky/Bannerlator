@@ -331,6 +331,8 @@ fun ContainersScreen(
                 androidx.compose.foundation.layout.Column {
                     Text(flow.container.name, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.size(8.dp))
+                    SaveFlowCaution()
+                    Spacer(Modifier.size(8.dp))
                     TextButton(onClick = { saveFlow = SaveFlow.BackupScope(flow.container) }, modifier = Modifier.fillMaxWidth()) {
                         Text("Back up this save", modifier = Modifier.weight(1f))
                     }
@@ -929,6 +931,36 @@ private fun ManualAddDialog(container: Container, onPick: (File) -> Unit, onCanc
         },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )
+}
+
+/**
+ * Caution shown on the Backup/Restore fork: save handling is not exhaustive (some games write
+ * saves outside the folders we scan) so users should verify a backup before wiping originals.
+ */
+@Composable
+private fun SaveFlowCaution() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(SurfaceVariantColor)
+            .padding(10.dp),
+    ) {
+        Column {
+            Text(
+                text = "⚠  " + stringResource(R.string.save_flow_caution_title),
+                color = OnSurface,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.size(4.dp))
+            Text(
+                text = stringResource(R.string.save_flow_caution_body),
+                color = OnSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
 }
 
 /** Blocking, non-dismissable spinner shown while a backup/restore runs off the UI thread. */
