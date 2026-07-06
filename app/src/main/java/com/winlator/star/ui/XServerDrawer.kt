@@ -470,32 +470,16 @@ private fun GraphicsContent(state: XServerDrawerState) {
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
-    // Fullscreen aspect-ratio cycle (#71): OFF -> FIT -> STRETCH -> FILL -> INTEGER. Shows the current mode name.
+    // Fullscreen aspect-ratio mode (#71 Stage 2): a segmented selector (Off/Fit/Stretch/Fill/Integer)
+    // that sets the mode live WITHOUT closing the drawer, so the user can compare modes before
+    // dismissing it — same box-chip idiom as the Scaling-mode row.
     val fullscreenMode by state.fullscreenMode.collectAsState()
-    val fullscreenModeLabel = when (fullscreenMode) {
-        1 -> stringResource(R.string.fullscreen_mode_fit)
-        2 -> stringResource(R.string.fullscreen_mode_stretch)
-        3 -> stringResource(R.string.fullscreen_mode_fill)
-        4 -> stringResource(R.string.fullscreen_mode_integer)
-        else -> stringResource(R.string.fullscreen_mode_off)
-    }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable { state.onToggleFullscreen?.run(); state.onClose?.run() }
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(stringResource(R.string.fullscreen_mode), color = MaterialTheme.colorScheme.onSurface)
-            Text(
-                fullscreenModeLabel,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            stringResource(R.string.fullscreen_mode),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
         Icon(
             painter = painterResource(R.drawable.icon_fullscreen),
             contentDescription = null,
@@ -503,6 +487,8 @@ private fun GraphicsContent(state: XServerDrawerState) {
             modifier = Modifier.size(20.dp)
         )
     }
+    Spacer(Modifier.height(6.dp))
+    FullscreenModeButtons(selected = fullscreenMode) { state.onSetFullscreenMode?.accept(it) }
 
     Spacer(Modifier.height(4.dp))
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
@@ -1315,6 +1301,57 @@ private fun DebandControls(enabled: Boolean = true) {
                 XServerDialogState.onDebandApply?.invoke(debandEnabled, debandStrength)
             },
             enabled = enabled)
+    }
+}
+
+// Fullscreen aspect-ratio selector (#71 Stage 2): 5 mode chips laid out as rows (3 + 2), same
+// box-chip idiom as UpscalerModeButtons. Selecting a mode applies it live and does NOT close the
+// drawer, so the user can flip between modes and settle on one before dismissing.
+@Composable
+private fun FullscreenModeButtons(selected: Int, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
+    val accentDim = LocalAccentDim.current
+    val options = listOf(
+        0 to stringResource(R.string.fullscreen_mode_off_short),
+        1 to stringResource(R.string.fullscreen_mode_fit_short),
+        2 to stringResource(R.string.fullscreen_mode_stretch_short),
+        3 to stringResource(R.string.fullscreen_mode_fill_short),
+        4 to stringResource(R.string.fullscreen_mode_integer_short)
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        options.chunked(3).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                row.forEach { (mode, label) ->
+                    val isSel = selected == mode
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSel) accent else Color.Black)
+                            .border(
+                                width = 1.dp,
+                                color = if (isSel) accent else accentDim,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onSelect(mode) }
+                            .padding(vertical = 9.dp)
+                    ) {
+                        Text(
+                            label,
+                            color = if (isSel) Color.Black else accent,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+                // Pad the short (2-chip) row so its buttons keep the same width as the 3-chip row.
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 

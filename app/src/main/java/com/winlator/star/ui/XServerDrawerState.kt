@@ -125,6 +125,10 @@ object XServerDrawerState {
     @JvmField var onGraphicEngine:          Runnable? = null
     @JvmField var onVibration:              Runnable? = null
     @JvmField var onToggleFullscreen:       Runnable? = null
+    // Direct set of the fullscreen aspect-ratio mode (#71 Stage 2): the drawer's segmented
+    // selector picks a mode without cycling and WITHOUT closing the drawer. Takes the target
+    // Container.FULLSCREEN_* value.
+    @JvmField var onSetFullscreenMode:      java.util.function.IntConsumer? = null
     @JvmField var onPauseResume:            Runnable? = null
     @JvmField var onPipMode:               Runnable? = null
     @JvmField var onActiveWindows:          Runnable? = null
@@ -235,7 +239,7 @@ object XServerDrawerState {
         _controlsAccentColor.value = 0xFF0055FF.toInt()
         onClose = null; onKeyboard = null; onInputControls = null
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
-        onToggleFullscreen = null; onPauseResume = null; onPipMode = null
+        onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null
         onActiveWindows = null; onTaskManager = null; onMagnifier = null
         onLogs = null; onExit = null; onMoveCursorToTouchpoint = null
         onRelativeMouseMovement = null; onDisableMouse = null

@@ -475,6 +475,12 @@
     <string name="fullscreen_mode_fill">Fill (Crop)</string>
     <string name="fullscreen_mode_integer">Integer (Pixel-Perfect)</string>
     <string name="fullscreen_mode_default">Use container default</string>
+    <!-- Compact labels for the in-game drawer's segmented fullscreen selector -->
+    <string name="fullscreen_mode_off_short">Off</string>
+    <string name="fullscreen_mode_fit_short">Fit</string>
+    <string name="fullscreen_mode_stretch_short">Stretch</string>
+    <string name="fullscreen_mode_fill_short">Fill</string>
+    <string name="fullscreen_mode_integer_short">Integer</string>
     <string name="frame_generation">Frame Generation (AI)</string>
     <string name="frame_generation_off">Off</string>
     <string name="frame_generation_bionic">bionic-fg</string>
