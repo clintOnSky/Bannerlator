@@ -125,7 +125,7 @@ index b7f3e03..e5fa182 100644
      if (!ctx) { BFG_LOGE("nativeCreateContext: FramegenContext::create failed"); return 0L; }
      return bionic_fg::ctxToHandle(ctx.release());
 diff --git a/src/vk_layer/layer.cpp b/src/vk_layer/layer.cpp
-index 66d1934..d54dcd0 100644
+index 66d1934..4c7f1c1 100644
 --- a/src/vk_layer/layer.cpp
 +++ b/src/vk_layer/layer.cpp
 @@ -16,6 +16,7 @@
@@ -316,7 +316,31 @@ index 66d1934..d54dcd0 100644
          VkCommandBufferAllocateInfo cbai{};
          cbai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
          cbai.commandPool        = st.copyPool;
-@@ -1031,6 +1125,91 @@ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
+@@ -1013,14 +1107,21 @@ static VkResult callNextPresent(VkQueue queue, const VkPresentInfoKHR* presentIn
+ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
+                                       VkSwapchainKHR swapchain, VkSemaphore signalSemaphore,
+                                       uint32_t* imageIndex) {
++    // Pace generated presents by blocking until the presentation engine releases
++    // the next FIFO slot/image instead of best-effort grabbing whatever is
++    // immediately available. This mirrors lsfg-vk's Android path and avoids the
++    // bursty "present everything right now or skip it" behavior from timeout=0.
++    constexpr uint64_t kAcquireTimeoutNs = UINT64_MAX;
++
+     if (dd.acquireNextImage) {
+-        return dd.acquireNextImage(device, swapchain, 0, signalSemaphore, VK_NULL_HANDLE, imageIndex);
++        return dd.acquireNextImage(device, swapchain, kAcquireTimeoutNs,
++                                   signalSemaphore, VK_NULL_HANDLE, imageIndex);
+     }
+     if (dd.acquireNextImage2) {
+         VkAcquireNextImageInfoKHR info{};
+         info.sType      = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR;
+         info.swapchain  = swapchain;
+-        info.timeout    = 0;
++        info.timeout    = kAcquireTimeoutNs;
+         info.semaphore  = signalSemaphore;
+         info.fence      = VK_NULL_HANDLE;
+         info.deviceMask = 1;
+@@ -1031,6 +1132,91 @@ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
  
  // ─── QueuePresentKHR ──────────────────────────────────────────────────────────
  
@@ -408,7 +432,7 @@ index 66d1934..d54dcd0 100644
  VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          VkQueue queue,
          const VkPresentInfoKHR* pPresentInfo) {
-@@ -1122,7 +1301,42 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1122,7 +1308,42 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          }
      }
  
@@ -452,7 +476,7 @@ index 66d1934..d54dcd0 100644
          return callNextPresent(queue, pPresentInfo);
      if (imgIdx >= st.images.size()) {
          BFG_LAYER_E("present image index %u out of range (%zu); passing through", imgIdx, st.images.size());
-@@ -1155,8 +1369,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1155,8 +1376,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
      // --- Step 1: Copy real swapchain image into current AHB input. The copy
      // waits on the application's original present semaphores, so the final real
      // present must not wait on those same binary semaphores again.
@@ -468,7 +492,7 @@ index 66d1934..d54dcd0 100644
          BFG_LAYER_E("copy fence wait/reset failed; passing through");
          return callNextPresent(queue, pPresentInfo);
      }
-@@ -1234,16 +1453,34 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1234,16 +1460,34 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          finalPresent.pWaitSemaphores = nullptr;
      }
  
@@ -506,7 +530,7 @@ index 66d1934..d54dcd0 100644
          for (auto& out : st.outProducerImgs) {
              out.layout = VK_IMAGE_LAYOUT_GENERAL;
              out.externalOwner = true;
-@@ -1267,7 +1504,25 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1267,7 +1511,25 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
                  continue;
              }
  
@@ -533,7 +557,7 @@ index 66d1934..d54dcd0 100644
              dd.resetFences(device, 1, &st.genFences[k]);
              VkCommandBuffer genCmd = st.genCmds[k];
              dd.resetCmdBuf(genCmd, 0);
-@@ -1338,8 +1593,20 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1338,8 +1600,20 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
              genPresent.swapchainCount     = 1;
              genPresent.pSwapchains        = &swapchain;
              genPresent.pImageIndices      = &genIdx;

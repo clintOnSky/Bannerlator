@@ -36,7 +36,10 @@ fork-local identity patch; `ludashi`/`pubg` flavors intentionally spoof other pa
   Two native components are git submodules — `app/src/main/cpp/bionic-fg` and
   `app/src/main/cpp/vkbasalt` — run `git submodule update --init --recursive` if they're empty.
   There are dedicated CI workflows (`build-bionic-fg.yml`, `build-vkbasalt.yml`) for rebuilding
-  those native layers independently.
+  those native layers independently. `bionic-fg` carries local fork fixes on top of upstream as
+  `patches/bionic-fg-bannerlator-fixes.patch` — a fresh submodule checkout is pristine upstream
+  and needs `git -C app/src/main/cpp/bionic-fg apply patches/bionic-fg-bannerlator-fixes.patch`
+  to restore them (`build-bionic-fg.yml` already does this automatically before building).
 - Signing: both debug and release use a fixed, publicly-known **AOSP testkey**
   (`keystore/testkey.p12`), so every build shares one signature and new builds install over
   old ones without an uninstall. Release has `crunchPngs false` (several `.png`-named assets

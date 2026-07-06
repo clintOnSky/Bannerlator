@@ -61,11 +61,20 @@ jobs:
           #   5. drop two instance exts wrongly listed as device exts;
           #   6. dispatch-routed vkGetPhysicalDeviceMemoryProperties (avoids a
           #      crash calling the global symbol from inside a layer with a
-          #      chain-level physical-device handle).
-          # (1)-(3), (5)-(6) verified on-device 2026-06-19; see
+          #      chain-level physical-device handle);
+          #   7. generated-frame image acquire blocks for the next FIFO slot
+          #      (UINT64_MAX) instead of a non-blocking best-effort grab
+          #      (timeout=0) — mirrors lsfg-vk's Android pacing, avoids bursty
+          #      present-or-skip behavior under contention. Ported from
+          #      upstream's own (unmerged) fix, commit 86f80b8 on
+          #      origin/feat/future-refresh-pacing — cherry-picked alone; that
+          #      branch's larger async present-scheduler commits were NOT
+          #      taken (predate single-device-mode, would need a real merge).
+          # (1)-(3), (5)-(7) verified on-device 2026-06-19; see
           # BIONIC_FG_INTEGRATION_REPORT.md §2 / BIONIC_FG_UPSTREAM_REPORT.md.
-          # (4) is local-build-verified only as of this comment — still needs
-          # the on-device FPS/jitter re-test described in the fix's plan.
+          # (4) and (7) are local-build-verified only as of this comment —
+          # still need the on-device FPS/jitter re-test described in the fix's
+          # plan.
           git -C app/src/main/cpp/bionic-fg apply --verbose \
             "${GITHUB_WORKSPACE}/patches/bionic-fg-bannerlator-fixes.patch"
 
