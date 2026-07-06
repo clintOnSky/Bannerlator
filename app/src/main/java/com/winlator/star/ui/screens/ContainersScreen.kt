@@ -939,14 +939,16 @@ private fun ManualAddDialog(container: Container, onPick: (File) -> Unit, onCanc
  */
 @Composable
 private fun SaveFlowCaution() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(SurfaceVariantColor)
-            .padding(10.dp),
+    // Translucent accent tint (not an opaque fill) so it composits over the dialog's own
+    // surface and reads as part of the theme instead of a black slab.
+    val accent = MaterialTheme.colorScheme.primary
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = accent.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.40f)),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Column {
+        Column(modifier = Modifier.padding(10.dp)) {
             Text(
                 text = "⚠  " + stringResource(R.string.save_flow_caution_title),
                 color = OnSurface,
