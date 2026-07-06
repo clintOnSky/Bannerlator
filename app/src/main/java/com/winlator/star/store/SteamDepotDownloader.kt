@@ -645,6 +645,24 @@ object SteamDepotDownloader {
             }
         })
 
+        // DLC picker: DLC the user opted out of (appId == depot id). When non-empty we hand the
+        // engine an EXPLICIT depot list (our filtered selection minus the excluded DLC) instead of
+        // letting it auto-resolve — so the unchecked DLC simply isn't downloaded. Default (nothing
+        // excluded) → empty lists → engine auto-resolves exactly as before.
+        val excludedDlc = try { SteamPrefs.getExcludedDlc(appId) } catch (_: Throwable) { emptySet() }
+        val explicitDepots: List<Int>
+        val explicitManifests: List<Long>
+        if (excludedDlc.isNotEmpty()) {
+            val kept = try { db.getDepotManifests(appId).filter { it.depotId !in excludedDlc && it.manifestId != 0L } }
+                       catch (_: Throwable) { emptyList() }
+            explicitDepots   = kept.map { it.depotId }
+            explicitManifests = kept.map { it.manifestId }
+            dlog("DLC opt-out: excluding ${excludedDlc.joinToString(",")} → downloading ${explicitDepots.size} depot(s) explicitly")
+        } else {
+            explicitDepots = emptyList()
+            explicitManifests = emptyList()
+        }
+
         val item = AppItem(
             appId = appId,
             installDirectory = installDir.absolutePath,
@@ -656,8 +674,11 @@ object SteamDepotDownloader {
             // of what os.arch returns on this Android device (arm64, aarch64, armv8l, etc.).
             // Wine/Box64 handles x86_64 translation; arch mismatch would filter all depots.
             downloadAllArchs = true,
+            depot = explicitDepots,
+            manifest = explicitManifests,
         )
-        dlog("Adding AppItem: appId=${item.appId} branch=${item.branch} dir=${item.installDirectory}")
+        dlog("Adding AppItem: appId=${item.appId} branch=${item.branch} dir=${item.installDirectory}" +
+             if (explicitDepots.isNotEmpty()) " depots=${explicitDepots.size}(explicit)" else "")
         downloader.add(item)
         downloader.finishAdding()
 
