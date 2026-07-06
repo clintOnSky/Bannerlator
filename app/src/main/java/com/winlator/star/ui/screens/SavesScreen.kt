@@ -67,6 +67,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.winlator.star.R
 import com.winlator.star.container.Container
 import com.winlator.star.saves.CustomFilePickerActivity
+import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.saves.Save
 import java.io.File
 import com.winlator.star.ui.theme.Divider as DividerColor
@@ -94,9 +95,19 @@ fun SavesScreen(vm: SavesViewModel = viewModel()) {
     var transferTarget by remember { mutableStateOf<Save?>(null) }
     var importUri by remember { mutableStateOf<Uri?>(null) }
 
+    // System SAF picker (secondary).
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) importUri = uri
     }
+    // Built-in in-app file picker (primary).
+    val importInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            InAppFilePicker.pickedUri(result.data)?.let { importUri = it }
+        }
+    }
+    var showImportMenu by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (saves.isEmpty() && !isLoading) {
@@ -129,12 +140,24 @@ fun SavesScreen(vm: SavesViewModel = viewModel()) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FloatingActionButton(
-                onClick = { importLauncher.launch("*/*") },
-                containerColor = Surface,
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(imageVector = Icons.Filled.FolderOpen, contentDescription = "Import save", tint = MaterialTheme.colorScheme.primary)
+            Box {
+                FloatingActionButton(
+                    onClick = { showImportMenu = true },
+                    containerColor = Surface,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(imageVector = Icons.Filled.FolderOpen, contentDescription = "Import save", tint = MaterialTheme.colorScheme.primary)
+                }
+                DropdownMenu(expanded = showImportMenu, onDismissRequest = { showImportMenu = false }) {
+                    DropdownMenuItem(text = { Text("Browse files") }, onClick = {
+                        showImportMenu = false
+                        importInAppLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.SAVE, "Select save archive"))
+                    })
+                    DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
+                        showImportMenu = false
+                        importLauncher.launch("*/*")
+                    })
+                }
             }
             FloatingActionButton(
                 onClick = { showNewSaveDialog = true },

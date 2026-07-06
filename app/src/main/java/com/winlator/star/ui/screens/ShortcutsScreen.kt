@@ -134,6 +134,7 @@ import com.winlator.star.core.FileUtils
 import com.winlator.star.core.KeyValueSet
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineInfo
+import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.fexcore.FEXCorePreset
 import com.winlator.star.fexcore.FEXCorePresetManager
 import com.winlator.star.inputcontrols.ControlsProfile
@@ -219,8 +220,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         }
     }
 
-    val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
+    fun handleShortcutImport(uri: Uri) {
         if (pendingImportContainerIndex >= 0) {
             val result = vm.importShortcut(pendingImportContainerIndex, uri, context)
             when (result) {
@@ -233,6 +233,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             }
             pendingImportContainerIndex = -1
         }
+    }
+    // System SAF picker (secondary).
+    val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) handleShortcutImport(uri)
+    }
+    // Built-in in-app file picker (primary).
+    val importFileInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { handleShortcutImport(it) }
     }
 
     val topBarActions = LocalTopBarActions.current
@@ -387,11 +397,18 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     .clickable {
                                         showImportContainerPicker = false
                                         pendingImportContainerIndex = index
-                                        importFileLauncher.launch("*/*")
+                                        if (importUseSystemPicker) importFileLauncher.launch("*/*")
+                                        else importFileInAppLauncher.launch(
+                                            InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select .exe / .desktop / .lnk")
+                                        )
                                     }
                                     .padding(vertical = 12.dp),
                                 color = OnSurface,
                             )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                            Checkbox(checked = importUseSystemPicker, onCheckedChange = { importUseSystemPicker = it })
+                            Text("Pick via system…", color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -1108,23 +1125,30 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
     val tabTitles = listOf("Win Components", "Env Vars", "Advanced")
 
     // Icon picker
-    val iconPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let {
-            runCatching {
-                val bitmap = context.contentResolver.openInputStream(it)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                } ?: return@runCatching
-                shortcut.iconFile?.let { f ->
-                    f.parentFile?.mkdirs()
-                    FileOutputStream(f).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
-                }
-                shortcut.icon = bitmap
-                iconBitmap = bitmap
+    fun applyIconFromUri(uri: Uri) {
+        runCatching {
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream)
+            } ?: return@runCatching
+            shortcut.iconFile?.let { f ->
+                f.parentFile?.mkdirs()
+                FileOutputStream(f).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
             }
+            shortcut.icon = bitmap
+            iconBitmap = bitmap
         }
     }
+    // System SAF picker (secondary).
+    val iconPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri -> uri?.let { applyIconFromUri(it) } }
+    // Built-in in-app image picker (primary).
+    val iconPickerInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { applyIconFromUri(it) }
+    }
+    var showIconPickMenu by remember { mutableStateOf(false) }
 
     // Load async data
     LaunchedEffect(Unit) {
@@ -1340,8 +1364,20 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                                 modifier = Modifier.size(48.dp)
                             )
                         }
-                        OutlinedButton(onClick = { iconPickerLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) {
-                            Text("Select Icon")
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(onClick = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Select Icon")
+                            }
+                            DropdownMenu(expanded = showIconPickMenu, onDismissRequest = { showIconPickMenu = false }) {
+                                DropdownMenuItem(text = { Text("Browse files") }, onClick = {
+                                    showIconPickMenu = false
+                                    iconPickerInAppLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.IMAGES, "Select icon image"))
+                                })
+                                DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
+                                    showIconPickMenu = false
+                                    iconPickerLauncher.launch("image/*")
+                                })
+                            }
                         }
                     }
 

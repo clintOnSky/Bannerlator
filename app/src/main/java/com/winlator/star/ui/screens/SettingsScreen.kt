@@ -64,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -71,6 +72,7 @@ import androidx.compose.ui.unit.sp
 import androidx.preference.PreferenceManager
 import com.winlator.star.R
 import com.winlator.star.SettingsFragment
+import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.box64.Box64EditPresetDialog
 import com.winlator.star.box64.Box64Preset
 import com.winlator.star.box64.Box64PresetManager
@@ -249,6 +251,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         }
     }
 
+    // SoundFont (.sf2). installSFCallback is set by the trigger before launching.
     val installSFLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -257,38 +260,57 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             installSFCallback = null
         }
     }
+    val installSFInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uri = if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data) else null
+        if (uri != null && installSFCallback != null) installSFCallback!!(uri)
+        installSFCallback = null
+    }
 
+    fun importBox64FromUri(uri: Uri) {
+        try {
+            val `is` = context.contentResolver.openInputStream(uri)
+            Box64PresetManager.importPreset("box64", context, `is`)
+            refreshBox64Presets()
+        } catch (_: Exception) { }
+    }
     val importBox64Launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                val `is` = context.contentResolver.openInputStream(uri)
-                Box64PresetManager.importPreset("box64", context, `is`)
-                refreshBox64Presets()
-            } catch (_: Exception) { }
-        }
+    ) { uri -> if (uri != null) importBox64FromUri(uri) }
+    val importBox64InAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { importBox64FromUri(it) }
     }
 
+    fun importFEXCoreFromUri(uri: Uri) {
+        try {
+            val `is` = context.contentResolver.openInputStream(uri)
+            FEXCorePresetManager.importPreset(context, `is`)
+            refreshFEXCorePresets()
+        } catch (_: Exception) { }
+    }
     val importFEXCoreLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                val `is` = context.contentResolver.openInputStream(uri)
-                FEXCorePresetManager.importPreset(context, `is`)
-                refreshFEXCorePresets()
-            } catch (_: Exception) { }
-        }
+    ) { uri -> if (uri != null) importFEXCoreFromUri(uri) }
+    val importFEXCoreInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { importFEXCoreFromUri(it) }
     }
 
+    fun beginRestoreFromUri(uri: Uri) {
+        pendingRestoreUri = uri
+        showRestoreConfirm = true
+    }
     val restoreFileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            pendingRestoreUri = uri
-            showRestoreConfirm = true
-        }
+    ) { uri -> if (uri != null) beginRestoreFromUri(uri) }
+    val restoreFileInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { beginRestoreFromUri(it) }
     }
 
     // lsfg-vk: the user picks their own Lossless Scaling DLL once; we COPY it into app files
@@ -301,20 +323,24 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             "Imported (" + (lsfgDllFile.length() / (1024 * 1024)) + " MB)"
         else "Not set — lsfg-vk will stay off"
     var lsfgDllStatus by remember { mutableStateOf(lsfgDllStatusText()) }
+    fun importLosslessDllFromUri(uri: Uri) {
+        try {
+            lsfgDllFile.parentFile?.mkdirs()
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                lsfgDllFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            lsfgDllStatus = lsfgDllStatusText()
+        } catch (e: Exception) {
+            lsfgDllStatus = "Import failed: " + e.message
+        }
+    }
     val importLosslessDllLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                lsfgDllFile.parentFile?.mkdirs()
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    lsfgDllFile.outputStream().use { output -> input.copyTo(output) }
-                }
-                lsfgDllStatus = lsfgDllStatusText()
-            } catch (e: Exception) {
-                lsfgDllStatus = "Import failed: " + e.message
-            }
-        }
+    ) { uri -> if (uri != null) importLosslessDllFromUri(uri) }
+    val importLosslessDllInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { importLosslessDllFromUri(it) }
     }
 
     if (isBackingUp) {
@@ -517,9 +543,13 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                         Box64PresetManager.exportPreset("box64", context, selectedBox64Preset)
                     } else AppUtils.showToast(context, "Cannot export this preset")
                 }) { Icon(Icons.Default.FileUpload, "Export", tint = MaterialTheme.colorScheme.onSurface) }
-                IconButton(onClick = { importBox64Launcher.launch(arrayOf("*/*")) }) {
-                    Icon(Icons.Default.FileDownload, "Import", tint = MaterialTheme.colorScheme.onSurface)
-                }
+                ImportSourceIconButton(
+                    icon = Icons.Default.FileDownload,
+                    contentDescription = "Import",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    onInApp = { importBox64InAppLauncher.launch(InAppFilePicker.buildIntent(context, emptyArray(), "Select box64 preset")) },
+                    onSystem = { importBox64Launcher.launch(arrayOf("*/*")) },
+                )
             }
         }
 
@@ -577,9 +607,13 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                         FEXCorePresetManager.exportPreset(context, selectedFEXCorePreset)
                     } else AppUtils.showToast(context, "Cannot export this preset")
                 }) { Icon(Icons.Default.FileUpload, "Export", tint = MaterialTheme.colorScheme.onSurface) }
-                IconButton(onClick = { importFEXCoreLauncher.launch(arrayOf("*/*")) }) {
-                    Icon(Icons.Default.FileDownload, "Import", tint = MaterialTheme.colorScheme.onSurface)
-                }
+                ImportSourceIconButton(
+                    icon = Icons.Default.FileDownload,
+                    contentDescription = "Import",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    onInApp = { importFEXCoreInAppLauncher.launch(InAppFilePicker.buildIntent(context, emptyArray(), "Select FEXCore preset")) },
+                    onSystem = { importFEXCoreLauncher.launch(arrayOf("*/*")) },
+                )
             }
         }
 
@@ -604,7 +638,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                         }
                     }
                 }
-                IconButton(onClick = {
+                val prepareSFInstall = {
                     installSFCallback = { uri ->
                         val act = activity
                         if (act != null) {
@@ -632,8 +666,14 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                             })
                         }
                     }
-                    installSFLauncher.launch(arrayOf("*/*"))
-                }) { Icon(Icons.Default.Add, "Install", tint = MaterialTheme.colorScheme.onSurface) }
+                }
+                ImportSourceIconButton(
+                    icon = Icons.Default.Add,
+                    contentDescription = "Install",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    onInApp = { prepareSFInstall(); installSFInAppLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.SF2, "Select SoundFont")) },
+                    onSystem = { prepareSFInstall(); installSFLauncher.launch(arrayOf("*/*")) },
+                )
                 IconButton(onClick = {
                     if (selectedSF != 0) {
                         ContentDialog.confirm(context, R.string.do_you_want_to_remove_this_sound_font) {
@@ -846,10 +886,14 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
             ) { Text("Backup Data", color = Color.White) } // intentional: high-contrast label on green fill
             Button(
-                onClick = { restoreFileLauncher.launch(arrayOf("*/*")) },
+                onClick = { restoreFileInAppLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.SAVE, "Select backup")) },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)), // intentional: green = success/safe action (install/backup/restore), distinct from accent
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
             ) { Text("Restore Data", color = Color.White) } // intentional: high-contrast label on green fill
+            TextButton(
+                onClick = { restoreFileLauncher.launch(arrayOf("*/*")) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Pick via system…", color = MaterialTheme.colorScheme.primary) }
         }
 
         // ── Frame Generation: lsfg-vk (Lossless Scaling DLL) ─────────────
@@ -866,10 +910,14 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                 modifier = Modifier.padding(bottom = 6.dp)
             )
             Button(
-                onClick = { importLosslessDllLauncher.launch(arrayOf("*/*")) },
+                onClick = { importLosslessDllInAppLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.DLL, "Select Lossless.dll")) },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)), // intentional: green = success/safe action (install/backup/restore), distinct from accent
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
             ) { Text("Import Lossless.dll", color = Color.White) } // intentional: high-contrast label on green fill
+            TextButton(
+                onClick = { importLosslessDllLauncher.launch(arrayOf("*/*")) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Pick via system…", color = MaterialTheme.colorScheme.primary) }
             if (lsfgDllFile.isFile) {
                 Button(
                     onClick = { lsfgDllFile.delete(); lsfgDllStatus = lsfgDllStatusText() },
@@ -943,6 +991,28 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
 }
 
 // ─── Reusable components ──────────────────────────────────────────────────
+
+/**
+ * Import trigger that offers the built-in file picker (primary) with the system SAF picker as a
+ * secondary "Pick via system…" option (issue #73).
+ */
+@Composable
+private fun ImportSourceIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    onInApp: () -> Unit,
+    onSystem: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) { Icon(icon, contentDescription, tint = tint) }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("Browse files") }, onClick = { expanded = false; onInApp() })
+            DropdownMenuItem(text = { Text("Pick via system…") }, onClick = { expanded = false; onSystem() })
+        }
+    }
+}
 
 @Composable
 private fun FieldSetLabel(text: String) {

@@ -67,6 +67,7 @@ import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.ui.findActivity
 import com.winlator.star.ui.theme.SurfaceVariant
+import com.winlator.star.util.InAppFilePicker
 import java.util.concurrent.Executors
 
 // ---------------------------------------------------------------------------
@@ -122,7 +123,8 @@ fun ContentsScreen(vm: ContentsViewModel = viewModel()) {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
+            // In-app picker returns a path (wrapped as file:// Uri); SAF returns result.data.data.
+            (result.data?.data ?: InAppFilePicker.pickedUri(result.data))?.let { uri ->
                 launchInstall(
                     context, uri, vm,
                     onLoading = { text -> loadingText = text },
@@ -233,16 +235,22 @@ fun ContentsScreen(vm: ContentsViewModel = viewModel()) {
             confirmButton = {
                 TextButton(onClick = {
                     confirmInstallPrompt = false
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "*/*"
-                    }
-                    filePicker.launch(intent)
-                }) { Text(context.getString(android.R.string.ok), color = MaterialTheme.colorScheme.primary) }
+                    filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content file"))
+                }) { Text("Browse files", color = MaterialTheme.colorScheme.primary) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmInstallPrompt = false }) {
-                    Text(context.getString(android.R.string.cancel), color = MaterialTheme.colorScheme.primary)
+                Row {
+                    TextButton(onClick = {
+                        confirmInstallPrompt = false
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                        }
+                        filePicker.launch(intent)
+                    }) { Text("Pick via system…", color = MaterialTheme.colorScheme.primary) }
+                    TextButton(onClick = { confirmInstallPrompt = false }) {
+                        Text(context.getString(android.R.string.cancel), color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             },
         )

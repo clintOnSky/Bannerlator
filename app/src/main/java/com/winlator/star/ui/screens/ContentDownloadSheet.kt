@@ -37,6 +37,7 @@ import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.Downloader
 import com.winlator.star.core.TarCompressorUtils
 import com.winlator.star.ui.findActivity
+import com.winlator.star.util.InAppFilePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -86,9 +87,10 @@ fun ContentDownloadSheet(
         isLoadingRemote = false
     }
 
-    // Manual "install from file" picker.
+    // Manual "install from file" picker. Handles both the in-app picker (selectedFile path,
+    // wrapped as a file:// Uri) and the system SAF picker (result.data.data).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        result.data?.data?.let { uri ->
+        (result.data?.data ?: InAppFilePicker.pickedUri(result.data))?.let { uri ->
             fileInstalling = true
             installContent(context, cm, uri, onProgress = {}) { ok ->
                 fileInstalling = false
@@ -177,13 +179,24 @@ fun ContentDownloadSheet(
                     if (fileInstalling) {
                         CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
                     } else {
-                        IconButton(onClick = {
-                            filePicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                                addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
-                            })
-                        }) {
-                            Icon(Icons.Filled.FolderOpen, contentDescription = "Install from file",
-                                tint = MaterialTheme.colorScheme.primary)
+                        var showPickMenu by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { showPickMenu = true }) {
+                                Icon(Icons.Filled.FolderOpen, contentDescription = "Install from file",
+                                    tint = MaterialTheme.colorScheme.primary)
+                            }
+                            DropdownMenu(expanded = showPickMenu, onDismissRequest = { showPickMenu = false }) {
+                                DropdownMenuItem(text = { Text("Browse files") }, onClick = {
+                                    showPickMenu = false
+                                    filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content file"))
+                                })
+                                DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
+                                    showPickMenu = false
+                                    filePicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                        addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+                                    })
+                                })
+                            }
                         }
                     }
                 }

@@ -87,7 +87,9 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         }
         val container = containers[containerIndex]
 
-        val sourceName = DocumentFile.fromSingleUri(context, uri)?.name
+        // file:// (in-app picker) exposes no DocumentFile metadata, so read the name off the path.
+        val sourceName = (if (uri.scheme == "file") uri.path?.substringAfterLast('/')
+            else DocumentFile.fromSingleUri(context, uri)?.name)
             ?: return ImportResult.Error("Could not read picked file.")
         val ext = sourceName.substringAfterLast('.', "").lowercase()
 
