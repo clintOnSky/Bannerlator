@@ -805,7 +805,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                 Text("Enable File Provider", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = {
-                    AppUtils.showHelpBox(context, null, R.string.help_file_provider)
+                    AppUtils.showHelpBox(context, android.view.View(context), R.string.help_file_provider)
                 }) { Icon(Icons.Default.Help, "Help", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
