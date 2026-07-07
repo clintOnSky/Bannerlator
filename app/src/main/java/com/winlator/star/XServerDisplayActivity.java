@@ -639,10 +639,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         };
         // Drawer HUD/FPS tab opened — refresh the live display-rate readout.
         state.onRefreshRatePoll = this::updateCurrentRefreshRate;
-        state.onToggleFullscreen       = () -> {
-            xServerView.getRenderer().toggleFullscreen();
-            touchpadView.toggleFullscreen();
-        };
+        // Cycle OFF -> FIT -> STRETCH -> FILL -> INTEGER -> OFF (legacy path; kept for any
+        // cycle-style trigger). The drawer selector uses onSetFullscreenMode below instead.
+        state.onToggleFullscreen       = () ->
+            applyFullscreenMode(Container.nextFullscreenMode(xServerView.getRenderer().getFullscreenMode()));
+        // Drawer segmented selector (#71 Stage 2): set the picked mode directly, live, without
+        // closing the drawer so the user can compare modes before dismissing it.
+        state.onSetFullscreenMode      = this::applyFullscreenMode;
         state.onPauseResume            = () -> setPausedState(!isPaused);
         state.onPipMode                = () -> enterPictureInPictureMode();
         state.onActiveWindows          = () -> showActiveWindowsDialog();
@@ -2187,7 +2190,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // artifact-free choice for a global default — and only seed Nearest (2) when the
             // container's filter mode is explicitly Nearest; mirror it into the drawer.
             // (filterMode: 0=default -> Linear, 1=linear -> Linear, 2=nearest -> Nearest.)
-            int initialUpscaler = container.getRendererFilterMode() == 2 ? 2 : 1;
+            // Per-game scaling mode wins if the user picked one in-game last session; else the
+            // container base filter (Linear/Nearest). Restores SGSR/FSR/etc. across relaunch.
+            int initialUpscaler = resolveScalingMode();
             vkRenderer.setUpscaler(initialUpscaler);
             XServerDialogState.INSTANCE.setUpscalerMode(initialUpscaler);
             // Supersampling: when the launch resolution was scaled above display res (see onCreate),
@@ -2215,7 +2220,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDialogState.INSTANCE.setVkNtsc(false);
             vkRenderer.setSwapRB(container.getRendererSwapRB());
             // Must run before the surface is created so onSurfaceCreated sets up the scanout path.
-            boolean nativeOn = container.isRendererNative();
+            // A restored preset scaling mode (>=3, e.g. FSR) lives in the compositor pass that native
+            // direct-scanout bypasses, so it wins over the container's native flag on relaunch —
+            // mirroring the in-game mutual exclusion (picking a preset turns Native Rendering off).
+            boolean nativeOn = container.isRendererNative() && initialUpscaler < 3;
             vkRenderer.setInitialNativeMode(nativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(nativeOn); // keep the toggle in sync
             // Tick the perf HUD per present (the Vulkan AHB path bypasses copyArea, which normally
@@ -2235,12 +2243,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // (filterMode: 0=default -> Linear, 1=linear -> Linear, 2=nearest -> Nearest.)
         if (renderer instanceof GLRenderer) {
             GLRenderer glr = (GLRenderer) renderer;
-            glr.setFilterMode(container.getRendererFilterMode());
+            // Per-game scaling mode restore: base sampler is Nearest for mode 2, else Linear; the
+            // spatial/preset part (modes 3-7) is seeded into the EffectComposer where the drawer
+            // callbacks are wired (see resolveScalingMode() / ds.setGlUpscalerMode below).
+            int glInitialMode = resolveScalingMode();
+            glr.setFilterMode(glInitialMode == 2 ? 2 : 1);
             // GL Native Rendering (direct scanout) lifecycle — mirror the Vulkan launch wiring. Must
             // run before the surface is created so GLRenderer.onSurfaceCreated builds the scanout
             // SurfaceControls when native is on. swapRB feeds the game SC color transform.
             glr.setSwapRB(container.getRendererSwapRB());
-            boolean glNativeOn = container.isRendererNative();
+            // A restored preset (>=3) lives in the composer pass native bypasses -> native off (parity
+            // with the in-game preset<->native mutual exclusion), same as the Vulkan seed above.
+            boolean glNativeOn = container.isRendererNative() && glInitialMode < 3;
             glr.setInitialNativeMode(glNativeOn);
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(glNativeOn); // keep the toggle in sync
             // GL native (FLIP/scanout) bypasses both onDrawFrame and copyArea, so drive the perf HUD
@@ -2331,25 +2345,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
             startDxApiDetection(rendererMode + " | ", dxName);
         }
 
-        // Get the fullscreen stretched extra from the shortcut if available
-        String shortcutFullscreenStretched = shortcut != null ? shortcut.getExtra("fullscreenStretched") : null;
-
-        // Proceed based on container and shortcut settings
-        boolean shouldStretch = false;
-
-        if (shortcut != null && shortcutFullscreenStretched != null) {
-            // Shortcut exists and has a valid setting
-            shouldStretch = shortcutFullscreenStretched.equals("1");
-        } else if (container != null && container.isFullscreenStretched()) {
-            // No shortcut or shortcut doesn't override, use the container's setting
-            shouldStretch = true;
+        // Resolve the fullscreen aspect-ratio mode (#71): a per-game shortcut override wins, else the
+        // container's setting, with backward-compat for the legacy per-game "fullscreenStretched".
+        int fullscreenMode = Container.FULLSCREEN_OFF;
+        String scMode = shortcut != null ? shortcut.getExtra("fullscreenMode") : "";
+        String scStretched = shortcut != null ? shortcut.getExtra("fullscreenStretched") : "";
+        if (shortcut != null && scMode != null && !scMode.isEmpty()) {
+            try { fullscreenMode = Integer.parseInt(scMode); } catch (NumberFormatException ignored) {}
+        } else if (shortcut != null && scStretched != null && !scStretched.isEmpty()) {
+            fullscreenMode = scStretched.equals("1") ? Container.FULLSCREEN_STRETCH : Container.FULLSCREEN_OFF;
+        } else if (container != null) {
+            fullscreenMode = container.getFullscreenMode();
         }
 
-        if (shouldStretch) {
-            // Toggle fullscreen mode based on the final decision
-            renderer.toggleFullscreen();
-            touchpadView.toggleFullscreen();
-        }
+        // Apply to the renderer. FIT and STRETCH are both fullscreen-immersive (bars already hidden
+        // for the whole session via AppUtils.hideSystemUI); OFF is the default windowed letterbox.
+        renderer.setFullscreenMode(fullscreenMode);
+        XServerDrawerState.INSTANCE.setFullscreenMode(fullscreenMode);
+        if (fullscreenMode != Container.FULLSCREEN_OFF) touchpadView.toggleFullscreen();
 
         if (shortcut != null) {
             String controlsProfile = shortcut.getExtra("controlsProfile");
@@ -2366,6 +2379,101 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         // Initialize inline tab states (Graphics, Controls, HUD)
         initInlineTabStates(renderer);
+    }
+
+    // Apply a fullscreen aspect-ratio mode (#71) live and remember it PER GAME: the per-game shortcut
+    // override if launched from one, else the container. Shared by the drawer's segmented selector
+    // (direct pick, drawer stays open) and the legacy cycle trigger.
+    private void applyFullscreenMode(int mode) {
+        HostRenderer r = xServerView.getRenderer();
+        r.setFullscreenMode(mode);
+        touchpadView.toggleFullscreen();          // recompute touch->guest map for the new mode
+        XServerDrawerState.INSTANCE.setFullscreenMode(mode);
+        if (shortcut != null) {
+            shortcut.putExtra("fullscreenMode", String.valueOf(mode));
+            shortcut.putExtra("fullscreenStretched", null); // clear legacy so it can't override
+            shortcut.saveData();
+        } else if (container != null) {
+            container.setFullscreenMode(mode);
+            container.saveData();
+        }
+    }
+
+    // Scaling/upscaler mode (0-7: None/Linear/Nearest/SGSR/FSR/FSR-Fit/Sharpen/NIS) persistence.
+    // In-game picks are remembered PER GAME (shortcut override, else container) so the drawer's
+    // "Scaling mode" picker is sticky across relaunch — matching the fullscreen-mode behavior.
+    private void persistScalingMode(int mode) {
+        if (shortcut != null) {
+            shortcut.putExtra("scalingMode", String.valueOf(mode));
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra("scalingMode", String.valueOf(mode));
+            container.saveData();
+        }
+    }
+
+    // Resolve the launch scaling mode: per-game shortcut override wins; else the persisted container
+    // value; else fall back to the container base sampler filter (0/2 -> Linear/Nearest).
+    private int resolveScalingMode() {
+        String sm = shortcut != null ? shortcut.getExtra("scalingMode") : null;
+        if ((sm == null || sm.isEmpty()) && container != null) sm = container.getExtra("scalingMode");
+        if (sm != null && !sm.isEmpty()) {
+            try {
+                int m = Integer.parseInt(sm);
+                if (m >= 0 && m <= 7) return m;
+            } catch (NumberFormatException ignored) {}
+        }
+        return container != null && container.getRendererFilterMode() == 2 ? 2 : 1;
+    }
+
+    // --- FPS / perf HUD position persistence (per game) ----------------------------------------
+    // Each overlay remembers its own dragged spot across relaunch. The classic vertical/horizontal
+    // orientations and the GameHub HUD use distinct keys, so flipping orientation or switching HUD
+    // style keeps each overlay in its own place. Written to the shortcut if launched from one, else
+    // the container.
+    private void persistHudPosition(String key, float x, float y) {
+        String vx = String.valueOf(Math.round(x)), vy = String.valueOf(Math.round(y));
+        if (shortcut != null) {
+            shortcut.putExtra(key + "X", vx);
+            shortcut.putExtra(key + "Y", vy);
+            shortcut.saveData();
+        } else if (container != null) {
+            container.putExtra(key + "X", vx);
+            container.putExtra(key + "Y", vy);
+            container.saveData();
+        }
+    }
+
+    private String getHudExtra(String key) {
+        if (shortcut != null) {
+            String v = shortcut.getExtra(key);
+            if (v != null && !v.isEmpty()) return v;
+        }
+        return container != null ? container.getExtra(key) : null;
+    }
+
+    // Restore a saved HUD position once the view is actually laid out (getX/setX need its measured
+    // size + post-layout left). The overlays are created GONE and revealed when the game window maps,
+    // so a one-shot layout listener is used instead of post(). Clamps into the root so a spot saved on
+    // a different screen size can't strand the overlay off-screen.
+    private void restoreHudPosition(final View view, String key) {
+        String sx = getHudExtra(key + "X"), sy = getHudExtra(key + "Y");
+        if (sx == null || sx.isEmpty() || sy == null || sy.isEmpty()) return;
+        final float savedX, savedY;
+        try { savedX = Integer.parseInt(sx); savedY = Integer.parseInt(sy); }
+        catch (NumberFormatException e) { return; }
+        view.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override public void onLayoutChange(View v, int l, int t, int r, int b,
+                                                 int ol, int ot, int or, int ob) {
+                if (v.getWidth() == 0 || v.getHeight() == 0) return; // not laid out yet
+                v.removeOnLayoutChangeListener(this);
+                View root = (View) v.getParent();
+                float maxX = root != null ? Math.max(0, root.getWidth()  - v.getWidth())  : savedX;
+                float maxY = root != null ? Math.max(0, root.getHeight() - v.getHeight()) : savedY;
+                v.setX(Math.max(0, Math.min(savedX, maxX)));
+                v.setY(Math.max(0, Math.min(savedY, maxY)));
+            }
+        });
     }
 
     // Vulkan preset <-> Native Rendering mutual exclusion (the two presets cannot coexist: native
@@ -2449,6 +2557,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.onUpscalerApply = (mode) -> {
                 if (mode >= 3) disableNativeRenderingForPreset(); // 3=SGSR 4=FSR 5=FSR-Fit 6=Sharpen
                 vkr.setUpscaler(mode);
+                persistScalingMode(mode);   // remember the pick per game (#scaling-persist)
             };
             ds.onCasApply = (enabled, sharpness) -> {
                 if (enabled) disableNativeRenderingForPreset();
@@ -2657,7 +2766,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // method already returned for non-GL above), so these never fire on Vulkan/ASR.
         // Seed the picker to match the base sampler filter the launch already applied
         // (container filter mode), mirroring the Vulkan seed: Nearest -> 2, else Linear (1).
-        int glSeedMode = (container != null && container.getRendererFilterMode() == 2) ? 2 : 1;
+        // Restore the per-game scaling mode (0-7) into the drawer picker + composer so an in-game
+        // SGSR/FSR/etc. choice survives relaunch (not just the Linear/Nearest base filter).
+        int glSeedMode = resolveScalingMode();
         ds.setGlUpscalerMode(glSeedMode);
         ds.setGlUpscaleSharpness(75);
         glRenderer.getEffectComposer().setUpscaler(glSeedMode, 0.75f);
@@ -2671,6 +2782,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // None/Linear/spatial/sharpen -> linear base sampler; Nearest -> point.
             glRenderer.setFilterMode(mode == 2 ? 2 : 1);
             glRenderer.getEffectComposer().setUpscaler(mode); // keeps the current sharpness
+            persistScalingMode(mode);   // remember the pick per game (#scaling-persist)
         };
         ds.onGlUpscaleSharpnessApply = (sharpness) -> {
             if (glRenderer == null) return;
@@ -3895,6 +4007,8 @@ return true;
         if (hudEngineShort != null) perfHud.setEngineLabel(hudEngineShort);
         if (hudGpuName != null) perfHud.setGpuModel(hudGpuName);
         perfHud.setVertical(!fpsHudHorizontal);
+        perfHud.setOnMovedListener((x, y) -> persistHudPosition("hudPosGH", x, y));
+        restoreHudPosition(perfHud, "hudPosGH");
         // Visible immediately if the game window is already mapped (live swap); otherwise it is
         // revealed by changeFrameRatingVisibility once the window appears (launch path).
         perfHud.setVisibility(frameRatingWindowId != -1 ? View.VISIBLE : View.GONE);
@@ -3920,6 +4034,8 @@ return true;
         // setOnClickListener never fires: the widget overrides onTouchEvent and consumes the
         // event without performClick(). Use the widget's own tap callback instead.
         frameRatingHorizontal.setOnTapListener(this::toggleFpsHudOrientation);
+        frameRatingHorizontal.setOnMovedListener((x, y) -> persistHudPosition("hudPosCH", x, y));
+        restoreHudPosition(frameRatingHorizontal, "hudPosCH");
         frameRatingHorizontal.setVisibility(shown && fpsHudHorizontal ? View.VISIBLE : View.GONE);
         rootView.addView(frameRatingHorizontal);
 
@@ -3935,6 +4051,8 @@ return true;
         frameRating.setLayoutParams(vlp);
         frameRating.applyConfig(fpsConfigString);
         frameRating.setOnTapListener(this::toggleFpsHudOrientation);
+        frameRating.setOnMovedListener((x, y) -> persistHudPosition("hudPosCV", x, y));
+        restoreHudPosition(frameRating, "hudPosCV");
         frameRating.setVisibility(shown && !fpsHudHorizontal ? View.VISIBLE : View.GONE);
         rootView.addView(frameRating);
 

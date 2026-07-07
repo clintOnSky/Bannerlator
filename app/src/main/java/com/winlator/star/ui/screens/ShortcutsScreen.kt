@@ -134,6 +134,7 @@ import com.winlator.star.core.FileUtils
 import com.winlator.star.core.KeyValueSet
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineInfo
+import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.fexcore.FEXCorePreset
 import com.winlator.star.fexcore.FEXCorePresetManager
 import com.winlator.star.inputcontrols.ControlsProfile
@@ -179,6 +180,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showImportContainerPicker by remember { mutableStateOf(false) }
     var pendingImportContainerIndex by remember { mutableStateOf(-1) }
+    // When checked, the shortcut import uses the system SAF picker instead of the in-app File Manager.
+    var importUseSystemPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameDialogName by remember { mutableStateOf("") }
     var renameDialogContainerIndex by remember { mutableStateOf(-1) }
@@ -219,8 +222,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         }
     }
 
-    val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
+    fun handleShortcutImport(uri: Uri) {
         if (pendingImportContainerIndex >= 0) {
             val result = vm.importShortcut(pendingImportContainerIndex, uri, context)
             when (result) {
@@ -233,6 +235,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             }
             pendingImportContainerIndex = -1
         }
+    }
+    // System SAF picker (secondary).
+    val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) handleShortcutImport(uri)
+    }
+    // Built-in in-app file picker (primary).
+    val importFileInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { handleShortcutImport(it) }
     }
 
     val topBarActions = LocalTopBarActions.current
@@ -387,11 +399,18 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     .clickable {
                                         showImportContainerPicker = false
                                         pendingImportContainerIndex = index
-                                        importFileLauncher.launch("*/*")
+                                        if (importUseSystemPicker) importFileLauncher.launch("*/*")
+                                        else importFileInAppLauncher.launch(
+                                            InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select .exe / .desktop / .lnk")
+                                        )
                                     }
                                     .padding(vertical = 12.dp),
                                 color = OnSurface,
                             )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                            Checkbox(checked = importUseSystemPicker, onCheckedChange = { importUseSystemPicker = it })
+                            Text("Pick via system…", color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -985,7 +1004,20 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
     var lcAll by remember { mutableStateOf(shortcut.getExtra("lc_all", shortcut.container.getLC_ALL())) }
 
     // Checkboxes / switches
-    var fullscreenStretched by remember { mutableStateOf(shortcut.getExtra("fullscreenStretched", "0") == "1") }
+    // Per-game fullscreen aspect-ratio override (#71): -1 = use container default, else
+    // Container.FULLSCREEN_OFF/FIT/STRETCH. Migrates the legacy per-game "fullscreenStretched".
+    var fullscreenModeOverride by remember {
+        mutableStateOf(
+            run {
+                val m = shortcut.getExtra("fullscreenMode")
+                when {
+                    m.isNotEmpty() -> m.toIntOrNull() ?: -1
+                    shortcut.getExtra("fullscreenStretched", "") == "1" -> com.winlator.star.container.Container.FULLSCREEN_STRETCH
+                    else -> -1
+                }
+            }
+        )
+    }
     // Close the session when this game exits — per-game override, defaults to the container's setting (ON).
     var autoCloseOnExit by remember {
         mutableStateOf(shortcut.getExtra("autoCloseOnExit", shortcut.container.getExtra("autoCloseOnExit", "1")) == "1")
@@ -1099,23 +1131,30 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
     val tabTitles = listOf("Win Components", "Env Vars", "Advanced")
 
     // Icon picker
-    val iconPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let {
-            runCatching {
-                val bitmap = context.contentResolver.openInputStream(it)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                } ?: return@runCatching
-                shortcut.iconFile?.let { f ->
-                    f.parentFile?.mkdirs()
-                    FileOutputStream(f).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
-                }
-                shortcut.icon = bitmap
-                iconBitmap = bitmap
+    fun applyIconFromUri(uri: Uri) {
+        runCatching {
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream)
+            } ?: return@runCatching
+            shortcut.iconFile?.let { f ->
+                f.parentFile?.mkdirs()
+                FileOutputStream(f).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
             }
+            shortcut.icon = bitmap
+            iconBitmap = bitmap
         }
     }
+    // System SAF picker (secondary).
+    val iconPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri -> uri?.let { applyIconFromUri(it) } }
+    // Built-in in-app image picker (primary).
+    val iconPickerInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { applyIconFromUri(it) }
+    }
+    var showIconPickMenu by remember { mutableStateOf(false) }
 
     // Load the Box64/FEXCore version lists. Keyed on contentRefreshKey so a download/remove in
     // the content sheets re-scans installed profiles live; selection initialization stays in the
@@ -1230,7 +1269,10 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             putExtra("emulator", StringUtils.parseIdentifier(selectedEmulator))
             putExtra("midiSoundFont", midiVal.ifEmpty { null })
             putExtra("lc_all", lcAll)
-            putExtra("fullscreenStretched", if (fullscreenStretched) "1" else null)
+            // #71: write the per-game mode override (or null = use container default) and clear the
+            // legacy boolean so it can never shadow the new key.
+            putExtra("fullscreenMode", if (fullscreenModeOverride < 0) null else fullscreenModeOverride.toString())
+            putExtra("fullscreenStretched", null)
             putExtra("autoCloseOnExit", if (autoCloseOnExit) "1" else "0")
             putExtra("inputType", finalInputType.toString())
             putExtra("exclusiveXInput", if (exclusiveXInput) "1" else "0")
@@ -1337,8 +1379,20 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                                 modifier = Modifier.size(48.dp)
                             )
                         }
-                        OutlinedButton(onClick = { iconPickerLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) {
-                            Text("Select Icon")
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(onClick = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Select Icon")
+                            }
+                            DropdownMenu(expanded = showIconPickMenu, onDismissRequest = { showIconPickMenu = false }) {
+                                DropdownMenuItem(text = { Text("Browse files") }, onClick = {
+                                    showIconPickMenu = false
+                                    iconPickerInAppLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.IMAGES, "Select icon image"))
+                                })
+                                DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
+                                    showIconPickMenu = false
+                                    iconPickerLauncher.launch("image/*")
+                                })
+                            }
                         }
                     }
 
@@ -1469,11 +1523,27 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                         singleLine = true
                     )
 
-                    // Fullscreen stretched
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = fullscreenStretched, onCheckedChange = { fullscreenStretched = it })
-                        Text(stringResource(R.string.fullscreen_stretched))
-                    }
+                    // Fullscreen aspect-ratio mode (#71) — per-game override. Index 0 = use the
+                    // container default; indices 1..5 map to Container.FULLSCREEN_OFF/FIT/STRETCH/FILL/INTEGER.
+                    val fsOverrideLabels = listOf(
+                        stringResource(R.string.fullscreen_mode_default),
+                        stringResource(R.string.fullscreen_mode_off),
+                        stringResource(R.string.fullscreen_mode_fit),
+                        stringResource(R.string.fullscreen_mode_stretch),
+                        stringResource(R.string.fullscreen_mode_fill),
+                        stringResource(R.string.fullscreen_mode_integer)
+                    )
+                    val fsOverrideIdx = if (fullscreenModeOverride < 0) 0 else (fullscreenModeOverride + 1)
+                        .coerceIn(1, fsOverrideLabels.size - 1)
+                    LabeledDropdown(
+                        label = stringResource(R.string.fullscreen_mode),
+                        options = fsOverrideLabels,
+                        selectedOption = fsOverrideLabels[fsOverrideIdx],
+                        onSelect = { sel ->
+                            val idx = fsOverrideLabels.indexOf(sel)
+                            fullscreenModeOverride = if (idx <= 0) -1 else idx - 1
+                        }
+                    )
 
                     // Close the session when this game exits (per-game override; container default is ON)
                     Row(verticalAlignment = Alignment.CenterVertically) {

@@ -70,6 +70,7 @@ import com.winlator.star.core.HttpUtils
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.ExternalController
 import com.winlator.star.inputcontrols.InputControlsManager
+import com.winlator.star.util.InAppFilePicker
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -118,10 +119,9 @@ fun InputControlsScreen() {
         onDispose { }
     }
 
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null && importProfileCallback != null) {
+    // Shared import logic: read a control profile from any Uri (in-app file:// or SAF content://).
+    fun importProfileFromUri(uri: Uri) {
+        if (importProfileCallback != null) {
             try {
                 val json = FileUtils.readString(context, uri)
                 val imported = manager.importProfile(JSONObject(json))
@@ -130,6 +130,20 @@ fun InputControlsScreen() {
                 AppUtils.showToast(context, R.string.unable_to_import_profile)
             }
             importProfileCallback = null
+        }
+    }
+
+    // System SAF picker (secondary).
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) importProfileFromUri(uri) }
+
+    // Built-in in-app file picker (primary).
+    val importInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            InAppFilePicker.pickedUri(result.data)?.let { importProfileFromUri(it) }
         }
     }
 
@@ -341,19 +355,29 @@ fun InputControlsScreen() {
                         val builder = android.app.AlertDialog.Builder(act)
                         val options = arrayOf(
                             act.getString(R.string.open_file),
+                            "Pick via system…",
                             act.getString(R.string.download_file)
                         )
                         builder.setItems(options) { _, which ->
+                            val setCallback = {
+                                importProfileCallback = { imported ->
+                                    currentProfile = imported
+                                    refreshProfiles()
+                                    refreshControllers()
+                                }
+                            }
                             when (which) {
                                 0 -> {
-                                    importProfileCallback = { imported ->
-                                        currentProfile = imported
-                                        refreshProfiles()
-                                        refreshControllers()
-                                    }
+                                    setCallback()
+                                    importInAppLauncher.launch(
+                                        InAppFilePicker.buildIntent(act, InAppFilePicker.ICP, "Select control profile")
+                                    )
+                                }
+                                1 -> {
+                                    setCallback()
                                     importLauncher.launch(arrayOf("*/*"))
                                 }
-                                1 -> showDownloadDialog = true
+                                2 -> showDownloadDialog = true
                             }
                         }
                         builder.show()

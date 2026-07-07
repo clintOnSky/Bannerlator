@@ -65,8 +65,12 @@ import com.winlator.star.R
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
+import com.winlator.star.core.TarCompressorUtils
+import com.winlator.star.store.download.formatEta
 import com.winlator.star.ui.findActivity
 import com.winlator.star.ui.theme.SurfaceVariant
+import com.winlator.star.util.ImportEtaTracker
+import com.winlator.star.util.InAppFilePicker
 import java.util.concurrent.Executors
 
 // ---------------------------------------------------------------------------
@@ -115,6 +119,9 @@ fun ContentsScreen(vm: ContentsViewModel = viewModel()) {
     var confirmRemove by remember { mutableStateOf<ContentProfile?>(null) }
     var showInfoFor by remember { mutableStateOf<ContentProfile?>(null) }
     var loadingText by remember { mutableStateOf<String?>(null) }
+    // Determinate extraction progress for large asset imports (null = indeterminate spinner).
+    var loadingFraction by remember { mutableStateOf<Float?>(null) }
+    var loadingEta by remember { mutableStateOf<String?>(null) }
     var installDialog by remember { mutableStateOf<InstallDialogState?>(null) }
 
     // File picker
@@ -122,11 +129,13 @@ fun ContentsScreen(vm: ContentsViewModel = viewModel()) {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
+            // In-app picker returns a path (wrapped as file:// Uri); SAF returns result.data.data.
+            (result.data?.data ?: InAppFilePicker.pickedUri(result.data))?.let { uri ->
                 launchInstall(
                     context, uri, vm,
                     onLoading = { text -> loadingText = text },
-                    onDone   = { loadingText = null },
+                    onProgress = { fraction, eta -> loadingFraction = fraction; loadingEta = eta },
+                    onDone   = { loadingText = null; loadingFraction = null; loadingEta = null },
                     onDialog = { state -> installDialog = state },
                 )
             }
@@ -202,7 +211,8 @@ fun ContentsScreen(vm: ContentsViewModel = viewModel()) {
                                 launchInstall(
                                     context, uri, vm,
                                     onLoading = { text -> loadingText = text },
-                                    onDone   = { loadingText = null },
+                                    onProgress = { fraction, eta -> loadingFraction = fraction; loadingEta = eta },
+                                    onDone   = { loadingText = null; loadingFraction = null; loadingEta = null },
                                     onDialog = { state -> installDialog = state },
                                 )
                             }
@@ -233,16 +243,22 @@ fun ContentsScreen(vm: ContentsViewModel = viewModel()) {
             confirmButton = {
                 TextButton(onClick = {
                     confirmInstallPrompt = false
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "*/*"
-                    }
-                    filePicker.launch(intent)
-                }) { Text(context.getString(android.R.string.ok), color = MaterialTheme.colorScheme.primary) }
+                    filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content file"))
+                }) { Text("Browse files", color = MaterialTheme.colorScheme.primary) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmInstallPrompt = false }) {
-                    Text(context.getString(android.R.string.cancel), color = MaterialTheme.colorScheme.primary)
+                Row {
+                    TextButton(onClick = {
+                        confirmInstallPrompt = false
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                        }
+                        filePicker.launch(intent)
+                    }) { Text("Pick via system…", color = MaterialTheme.colorScheme.primary) }
+                    TextButton(onClick = { confirmInstallPrompt = false }) {
+                        Text(context.getString(android.R.string.cancel), color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             },
         )
@@ -265,9 +281,23 @@ fun ContentsScreen(vm: ContentsViewModel = viewModel()) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(24.dp),
                 ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.height(16.dp))
-                    Text(msg, color = MaterialTheme.colorScheme.onSurface)
+                    val fraction = loadingFraction
+                    if (fraction != null) {
+                        // Determinate: percent + ETA for large extractions.
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        val pctLabel = "${(fraction * 100).toInt()}%"
+                        val etaLabel = loadingEta?.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""
+                        Text("$msg  $pctLabel$etaLabel", color = MaterialTheme.colorScheme.onSurface)
+                    } else {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(16.dp))
+                        Text(msg, color = MaterialTheme.colorScheme.onSurface)
+                    }
                 }
             }
         }
@@ -564,11 +594,22 @@ private fun ContentItem(
 // ---------------------------------------------------------------------------
 // Install pipeline
 // ---------------------------------------------------------------------------
+
+// Compressed size of the import source; 0 when unknown. file:// reads the File length directly;
+// content:// falls back to the file descriptor's stat size.
+private fun resolveSourceSize(context: Context, uri: Uri): Long {
+    if (uri.scheme == "file") return uri.path?.let { java.io.File(it).length() } ?: 0L
+    return try {
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize.coerceAtLeast(0L) } ?: 0L
+    } catch (_: Exception) { 0L }
+}
+
 private fun launchInstall(
     context: Context,
     uri: Uri,
     vm: ContentsViewModel,
     onLoading: (String?) -> Unit,
+    onProgress: (fraction: Float, etaText: String) -> Unit = { _, _ -> },
     onDone: () -> Unit,
     onDialog: (InstallDialogState) -> Unit,
 ) {
@@ -638,9 +679,22 @@ private fun launchInstall(
         }
     }
 
+    // Compressed source size drives the determinate progress bar. file:// (in-app picker) reads it
+    // directly; content:// (SAF) is queried; 0 = unknown → falls back to the indeterminate spinner.
+    val total = resolveSourceSize(context, uri)
+    val etaTracker = ImportEtaTracker()
+
     Executors.newSingleThreadExecutor().execute {
         try {
-            vm.manager.extraContentFile(uri, callback)
+            if (total > 0L) {
+                val progress = TarCompressorUtils.OnReadProgressListener { bytesRead, srcTotal ->
+                    val p = etaTracker.update(bytesRead, if (srcTotal > 0L) srcTotal else total)
+                    activity.runOnUiThread { onProgress(p.pct / 100f, formatEta(p.etaSeconds)) }
+                }
+                vm.manager.extraContentFile(uri, total, progress, callback)
+            } else {
+                vm.manager.extraContentFile(uri, callback)
+            }
         } catch (e: Throwable) {
             // A malformed / unsupported archive (e.g. a Winlator-format .wcp) can throw
             // an uncaught exception deep in the decompressor. Surface it as the normal

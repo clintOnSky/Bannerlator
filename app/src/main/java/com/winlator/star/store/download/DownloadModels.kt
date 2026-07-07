@@ -24,6 +24,21 @@ fun formatDownloadSize(bytes: Long): String = when {
     else                    -> "%.0f KB".format(bytes / 1024.0)
 }
 
+/** Download speed, e.g. "12.4 MB/s". <=0 → "". Shared by the manager, detail page and notification. */
+fun formatDownloadSpeed(bytesPerSec: Long): String =
+    if (bytesPerSec <= 0L) "" else "${formatDownloadSize(bytesPerSec)}/s"
+
+/** Human ETA, e.g. "<1 min left", "~8 min left", "~1 h 20 m left". Negative → "" (unknown). */
+fun formatEta(seconds: Long): String = when {
+    seconds < 0L    -> ""
+    seconds < 60L   -> "<1 min left"
+    seconds < 3600L -> "~${seconds / 60} min left"
+    else            -> {
+        val h = seconds / 3600L; val m = (seconds % 3600L) / 60L
+        if (m == 0L) "~$h h left" else "~$h h $m m left"
+    }
+}
+
 /**
  * Lifecycle of a single download row.
  *
@@ -81,6 +96,9 @@ data class DownloadEntry(
     // compressed-fetched-over-network:
     val downloadDone: Long = 0L,
     val downloadTotal: Long = 0L,
+    // Smoothed network speed (bytes/s, 0 = unknown) and ETA to completion (seconds, -1 = unknown).
+    val speedBps: Long = 0L,
+    val etaSeconds: Long = -1L,
     val supportsPause: Boolean = false,
     val installPath: String? = null,
     val error: String? = null,

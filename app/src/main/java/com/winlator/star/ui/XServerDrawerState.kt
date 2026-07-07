@@ -91,6 +91,11 @@ object XServerDrawerState {
     private val _currentRefreshRate = MutableStateFlow(0)
     val currentRefreshRate: StateFlow<Int> = _currentRefreshRate
 
+    // Current fullscreen aspect-ratio mode (#71): Container.FULLSCREEN_OFF/FIT/STRETCH. Shown next
+    // to the in-game "Toggle Fullscreen" row so the user sees which mode the cycle landed on.
+    private val _fullscreenMode = MutableStateFlow(0)
+    val fullscreenMode: StateFlow<Int> = _fullscreenMode
+
     private val _fpsExpanded = MutableStateFlow(false)
     val fpsExpanded: StateFlow<Boolean> = _fpsExpanded
 
@@ -120,6 +125,10 @@ object XServerDrawerState {
     @JvmField var onGraphicEngine:          Runnable? = null
     @JvmField var onVibration:              Runnable? = null
     @JvmField var onToggleFullscreen:       Runnable? = null
+    // Direct set of the fullscreen aspect-ratio mode (#71 Stage 2): the drawer's segmented
+    // selector picks a mode without cycling and WITHOUT closing the drawer. Takes the target
+    // Container.FULLSCREEN_* value.
+    @JvmField var onSetFullscreenMode:      java.util.function.IntConsumer? = null
     @JvmField var onPauseResume:            Runnable? = null
     @JvmField var onPipMode:               Runnable? = null
     @JvmField var onActiveWindows:          Runnable? = null
@@ -176,6 +185,8 @@ object XServerDrawerState {
     fun setNativeRenderingEnabled(v: Boolean) { _nativeRenderingEnabled.value = v }
     fun getNativeRenderingEnabled(): Boolean = _nativeRenderingEnabled.value
 
+    fun setFullscreenMode(v: Int) { _fullscreenMode.value = v }
+
     fun setBionicFgActive(v: Boolean)      { _bionicFgActive.value = v }
     fun setFrameGenEnabled(v: Boolean)     { _frameGenEnabled.value = v }
     fun setFrameGenMultiplier(v: Int)      { _frameGenMultiplier.value = v }
@@ -228,7 +239,7 @@ object XServerDrawerState {
         _controlsAccentColor.value = 0xFF0055FF.toInt()
         onClose = null; onKeyboard = null; onInputControls = null
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
-        onToggleFullscreen = null; onPauseResume = null; onPipMode = null
+        onToggleFullscreen = null; onSetFullscreenMode = null; onPauseResume = null; onPipMode = null
         onActiveWindows = null; onTaskManager = null; onMagnifier = null
         onLogs = null; onExit = null; onMoveCursorToTouchpoint = null
         onRelativeMouseMovement = null; onDisableMouse = null

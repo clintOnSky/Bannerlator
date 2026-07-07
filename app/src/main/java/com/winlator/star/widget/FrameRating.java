@@ -68,6 +68,10 @@ public class FrameRating extends FrameLayout implements Runnable {
     /** Invoked on a single tap (not a drag); used to toggle HUD orientation in-game. */
     public void setOnTapListener(Runnable r) { this.onTapListener = r; }
 
+    /** Invoked when a drag ends, with the overlay's final (x, y). Used to persist HUD position. */
+    private java.util.function.BiConsumer<Float, Float> onMovedListener = null;
+    public void setOnMovedListener(java.util.function.BiConsumer<Float, Float> l) { this.onMovedListener = l; }
+
     // Fallback thermal paths (used only if zone auto-discovery finds nothing).
     private static final String[] THERMAL_PATHS = {
         "/sys/class/thermal/thermal_zone0/temp", "/sys/class/thermal/thermal_zone1/temp",
@@ -143,6 +147,8 @@ public class FrameRating extends FrameLayout implements Runnable {
                         && (event.getEventTime() - downTime) <= ViewConfiguration.getLongPressTimeout()
                         && onTapListener != null) {
                     onTapListener.run();
+                } else if (moved && onMovedListener != null) {
+                    onMovedListener.accept(getX(), getY());
                 }
                 return true;
         }

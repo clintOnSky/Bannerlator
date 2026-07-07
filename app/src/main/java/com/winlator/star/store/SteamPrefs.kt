@@ -90,6 +90,27 @@ object SteamPrefs {
         prefs.edit().putString(K_GOLDBERG_PREFIX + appId, mode.name).apply()
     }
 
+    // ── DLC picker: per-game EXCLUDED DLC (opt-out) ──────────────────────────
+    // Owned DLC downloads with the game by default; the picker lets the user opt
+    // OUT of specific DLC. We store the excluded set (CSV of DLC appIds) rather
+    // than the included set, so the default (nothing stored) = include everything.
+    // Per-game user preference (not synced library data), so it lives here.
+
+    private const val K_EXCLUDED_DLC_PREFIX = "excluded_dlc_"
+
+    /** DLC appIds the user has opted OUT of for [appId]. Empty = include all owned DLC. */
+    fun getExcludedDlc(appId: Int): Set<Int> {
+        val csv = prefs.getString(K_EXCLUDED_DLC_PREFIX + appId, "") ?: ""
+        if (csv.isEmpty()) return emptySet()
+        return csv.split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
+    }
+
+    /** Persist the DLC appIds the user opted out of for [appId] (empty clears it). */
+    fun setExcludedDlc(appId: Int, excluded: Set<Int>) {
+        val csv = excluded.joinToString(",")
+        prefs.edit().putString(K_EXCLUDED_DLC_PREFIX + appId, csv).apply()
+    }
+
     /** Wipe all Steam credentials and session state. */
     fun clear() {
         prefs.edit()

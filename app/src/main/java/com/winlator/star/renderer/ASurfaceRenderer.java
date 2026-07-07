@@ -5,6 +5,7 @@ import android.os.Build;
 import android.util.Log;
 import android.view.Surface;
 
+import com.winlator.star.container.Container;
 import com.winlator.star.widget.XServerView;
 import com.winlator.star.xserver.Bitmask;
 import com.winlator.star.xserver.Cursor;
@@ -62,7 +63,9 @@ public class ASurfaceRenderer implements HostRenderer,
     // HostRenderer-backed state
     private boolean cursorVisible = true;     // container-level cursor toggle
     private boolean gameCursorVisible = true; // guest-requested cursor visibility
-    private boolean fullscreen = false;
+    // Fullscreen aspect-ratio mode (#71). STRETCH fills the surface (distorts); OFF/FIT letterbox.
+    private int fullscreenMode = Container.FULLSCREEN_OFF;
+    private boolean isStretch() { return fullscreenMode == Container.FULLSCREEN_STRETCH; }
     private boolean screenOffsetYRelativeToCursor = false;
     private float magnifierZoom = 1.0f;
     private int fpsLimit = 0;
@@ -134,7 +137,7 @@ public class ASurfaceRenderer implements HostRenderer,
     public void onSurfaceChanged(Surface surface, int width, int height) {
         surfaceWidth = width;
         surfaceHeight = height;
-        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height);
+        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height, fullscreenMode);
         if (!surfaceInitialized) {
             onSurfaceCreated(surface);
         } else {
@@ -155,8 +158,17 @@ public class ASurfaceRenderer implements HostRenderer,
 
     private void updateTransform() {
         if (!surfaceInitialized) return;
-        nativeScanoutSetDst(viewTransformation.viewOffsetX, viewTransformation.viewOffsetY,
-                viewTransformation.viewWidth, viewTransformation.viewHeight);
+        // Refresh letterbox/crop/integer geometry for the current mode so the in-game toggle updates
+        // live (setFullscreenMode -> updateTransform/updateScene). STRETCH ignores viewTransformation.
+        if (surfaceWidth > 0 && surfaceHeight > 0)
+            viewTransformation.update(surfaceWidth, surfaceHeight,
+                    xServer.screenInfo.width, xServer.screenInfo.height, fullscreenMode);
+        if (isStretch()) {
+            nativeScanoutSetDst(0, 0, surfaceWidth, surfaceHeight);
+        } else {
+            nativeScanoutSetDst(viewTransformation.viewOffsetX, viewTransformation.viewOffsetY,
+                    viewTransformation.viewWidth, viewTransformation.viewHeight);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -292,7 +304,17 @@ public class ASurfaceRenderer implements HostRenderer,
                                       boolean isDesktopWindow, boolean isDesktopChild,
                                       Rect outSrc, Rect outDst) {
         outSrc.set(0, 0, w, h);
-        // Uniform map from X-screen space to the letterboxed surface region. `aspect` is the
+        // STRETCH (#71): non-uniform map from the whole guest screen onto the whole surface — fills
+        // the surface and distorts aspect, matching the GL/Vulkan stretch path.
+        if (isStretch()) {
+            float sx = surfaceWidth  > 0 ? (float) surfaceWidth  / xServer.screenInfo.width  : 1f;
+            float sy = surfaceHeight > 0 ? (float) surfaceHeight / xServer.screenInfo.height : 1f;
+            int sdstL = Math.round(rootX * sx);
+            int sdstT = Math.round(rootY * sy);
+            outDst.set(sdstL, sdstT, sdstL + Math.round(w * sx), sdstT + Math.round(h * sy));
+            return adjustRectLT(outSrc, outDst);
+        }
+        // OFF/FIT: uniform map from X-screen space to the letterboxed surface region. `aspect` is the
         // surface-pixels-per-X-pixel scale (viewWidth/screenWidth) and viewOffset is the
         // letterbox bar. rootX/rootY are already root-relative X-screen coords, so every window
         // (desktop, child, top-level) scales identically — no special desktop casing needed.
@@ -464,8 +486,10 @@ public class ASurfaceRenderer implements HostRenderer,
     @Override public void setFilterMode(int mode) { /* ASR has no shader/filter pass */ }
     @Override public void setMagnifierZoom(float zoom) { this.magnifierZoom = zoom; }
     @Override public float getMagnifierZoom() { return magnifierZoom; }
-    @Override public void toggleFullscreen() { fullscreen = !fullscreen; updateScene(); }
-    @Override public boolean isFullscreen() { return fullscreen; }
+    @Override public void toggleFullscreen() { setFullscreenMode(Container.nextFullscreenMode(fullscreenMode)); }
+    @Override public boolean isFullscreen() { return fullscreenMode != Container.FULLSCREEN_OFF; }
+    @Override public int getFullscreenMode() { return fullscreenMode; }
+    @Override public void setFullscreenMode(int mode) { fullscreenMode = mode; updateTransform(); updateScene(); }
     @Override public void setScreenOffsetYRelativeToCursor(boolean b) { screenOffsetYRelativeToCursor = b; }
     @Override public boolean isScreenOffsetYRelativeToCursor() { return screenOffsetYRelativeToCursor; }
     @Override public void setFpsWindowId(int id) { this.fpsWindowId = id; }

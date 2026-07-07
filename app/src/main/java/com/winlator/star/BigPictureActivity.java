@@ -291,11 +291,8 @@ public class BigPictureActivity extends AppCompatActivity {
         backgroundView.startAnimation();
 
         // Launch file picker when button is clicked
-        selectWallpaperButton.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-            intent.setType("image/*");
-            startActivityForResult(intent, REQUEST_CODE_SELECT_WALLPAPER);
-        });
+        selectWallpaperButton.setOnClickListener(v ->
+            promptPickFile(new String[]{"png", "jpg", "jpeg", "webp", "bmp", "gif"}, "Select wallpaper", "image/*", REQUEST_CODE_SELECT_WALLPAPER));
 
 
         if ("custom_wallpaper".equals(savedAnimation)) {
@@ -411,12 +408,8 @@ public class BigPictureActivity extends AppCompatActivity {
 
 
         Button selectMp3Button = findViewById(R.id.selectMp3Button);
-        selectMp3Button.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-            intent.setType("audio/mpeg");
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            startActivityForResult(intent, REQUEST_CODE_SELECT_MP3);
-        });
+        selectMp3Button.setOnClickListener(v ->
+            promptPickFile(new String[]{"mp3"}, "Select MP3", "audio/mpeg", REQUEST_CODE_SELECT_MP3));
 
 
 
@@ -871,12 +864,37 @@ public class BigPictureActivity extends AppCompatActivity {
 
 
 
-    // Prompt user to select a custom cover art image from gallery
+    // Prompt user to select a custom cover art image (built-in picker primary, SAF secondary).
     private void promptForCustomCoverArtUpload() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-        intent.setType("image/*");
-//        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
-        startActivityForResult(intent, REQUEST_CODE_UPLOAD_CUSTOM_COVER);
+        promptPickFile(new String[]{"png", "jpg", "jpeg", "webp", "bmp", "gif"}, "Select cover art", "image/*", REQUEST_CODE_UPLOAD_CUSTOM_COVER);
+    }
+
+    // Two-option chooser used by every big-picture file import: built-in File Manager first
+    // (reliable with MANAGE_EXTERNAL_STORAGE on TV/OEM skins), then the system SAF picker.
+    private void promptPickFile(String[] extensions, String pickerTitle, String safType, int requestCode) {
+        new android.app.AlertDialog.Builder(this)
+            .setItems(new CharSequence[]{"Browse files", "Pick via system…"}, (d, which) -> {
+                if (which == 0) {
+                    Intent intent = new Intent(this, FilePickerActivity.class);
+                    intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, extensions);
+                    intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, pickerTitle);
+                    startActivityForResult(intent, requestCode);
+                } else {
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setType(safType);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    startActivityForResult(intent, requestCode);
+                }
+            })
+            .show();
+    }
+
+    // Resolve the picked Uri from either the in-app picker (file:// via selectedFile) or SAF.
+    private Uri resolvePickedUri(Intent data) {
+        if (data == null) return null;
+        if (data.getData() != null) return data.getData();
+        String path = data.getStringExtra(FilePickerActivity.EXTRA_SELECTED_FILE);
+        return path != null ? Uri.fromFile(new File(path)) : null;
     }
 
     private void enableImmersiveMode() {
@@ -1197,7 +1215,7 @@ public class BigPictureActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
 
         if (requestCode == REQUEST_CODE_SELECT_WALLPAPER && resultCode == RESULT_OK && data != null) {
-            Uri selectedImageUri = data.getData();
+            Uri selectedImageUri = resolvePickedUri(data);
 
             try {
                 // Save the selected wallpaper as custom_bg.png
@@ -1240,8 +1258,8 @@ public class BigPictureActivity extends AppCompatActivity {
 
         }
 
-        if (requestCode == REQUEST_CODE_SELECT_MP3 && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            selectedMp3Uri = data.getData();
+        if (requestCode == REQUEST_CODE_SELECT_MP3 && resultCode == RESULT_OK && resolvePickedUri(data) != null) {
+            selectedMp3Uri = resolvePickedUri(data);
 
             // Get the internal storage directory
             File appStorageDir = getFilesDir();
@@ -1260,8 +1278,8 @@ public class BigPictureActivity extends AppCompatActivity {
             } else {
                 Log.e("BigPictureActivity", "Failed to copy the MP3 file.");
             }
-        } else if (requestCode == REQUEST_CODE_UPLOAD_CUSTOM_COVER && data.getData() != null) {
-            Uri selectedImageUri = data.getData();
+        } else if (requestCode == REQUEST_CODE_UPLOAD_CUSTOM_COVER && resolvePickedUri(data) != null) {
+            Uri selectedImageUri = resolvePickedUri(data);
             try {
                 InputStream inputStream = getContentResolver().openInputStream(selectedImageUri);
                 Bitmap customCoverArt = BitmapFactory.decodeStream(inputStream);

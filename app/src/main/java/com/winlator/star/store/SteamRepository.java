@@ -1019,6 +1019,15 @@ public final class SteamRepository {
                         // downloaded, so it is skipped entirely (contributes nothing).
                         StringBuilder depotSb = new StringBuilder();
                         java.util.List<Integer> includedDlcIds = new java.util.ArrayList<>();  // owned DLC bundled with the game
+                        // The game's DLC appIds (extended/listofdlc). A depot whose id is in this set is
+                        // a DLC depot (its depot id == the DLC appId) — see the depot loop for handling.
+                        java.util.Set<Integer> dlcSet = new java.util.HashSet<>();
+                        String listOfDlc = kvStr(root.get("extended").get("listofdlc"));
+                        if (!listOfDlc.isEmpty()) {
+                            for (String s : listOfDlc.split(",")) {
+                                try { dlcSet.add(Integer.parseInt(s.trim())); } catch (NumberFormatException ignored) {}
+                            }
+                        }
                         long totalSize     = 0L;   // uncompressed (install) total — SELECTED depots only
                         long totalDownload = 0L;   // compressed (network) total — SELECTED depots only
                         int selectedCount = 0, skippedCount = 0;
@@ -1061,22 +1070,20 @@ public final class SteamRepository {
                                     Log.d(TAG, "app " + app.getId() + " skip depot " + depotId + " lowviolence");
                                     skippedCount++; continue;
                                 }
-                                // Skip DLC depots the account doesn't own. A DLC depot carries
-                                // config/dlcappid = the DLC's appId; include it only if that DLC is
-                                // licensed. (Prevents the unowned-DLC-depot false-install-failure.)
-                                String dlcAppIdStr = kvStr(config.get("dlcappid")).trim();
-                                if (!dlcAppIdStr.isEmpty()) {
-                                    try {
-                                        int dlcAppId = Integer.parseInt(dlcAppIdStr);
-                                        if (!licensedApps.contains(dlcAppId)) {
-                                            Log.d(TAG, "app " + app.getId() + " skip depot " + depotId
-                                                    + " dlcappid=" + dlcAppId + " (DLC not owned)");
-                                            skippedCount++; continue;
-                                        }
-                                        // Owned DLC — its depot downloads with the game; record for the
-                                        // detail-page "Includes DLC:" line.
-                                        if (!includedDlcIds.contains(dlcAppId)) includedDlcIds.add(dlcAppId);
-                                    } catch (NumberFormatException ignored) {}
+                                // DLC handling. Steam does NOT tag a depot's config with dlcappid here;
+                                // instead the game lists its DLC appIds in extended/listofdlc, and each
+                                // DLC's depot id == that DLC's appId (verified: Just Cause 3 depots
+                                // 388290.. == its DLC appIds; See No Evil depot 320210 == its soundtrack
+                                // DLC). So a depot whose id is in the game's DLC set is a DLC depot:
+                                //   - not licensed → SKIP (unowned DLC; else the engine tries a depot it
+                                //     has no key for → 0 bytes → false "incomplete" on the owned game).
+                                //   - licensed → keep + record for the detail-page "Includes DLC:" line.
+                                if (dlcSet.contains(depotId)) {
+                                    if (!licensedApps.contains(depotId)) {
+                                        Log.d(TAG, "app " + app.getId() + " skip DLC depot " + depotId + " (not owned)");
+                                        skippedCount++; continue;
+                                    }
+                                    if (!includedDlcIds.contains(depotId)) includedDlcIds.add(depotId);
                                 }
 
                                 // Selected — count it.

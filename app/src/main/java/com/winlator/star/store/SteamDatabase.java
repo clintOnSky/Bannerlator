@@ -320,29 +320,37 @@ public final class SteamDatabase extends SQLiteOpenHelper {
         getWritableDatabase().update("steam_games", cv, "app_id = ?", new String[]{String.valueOf(appId)});
     }
 
-    /** Display names of the owned DLC bundled with this game (resolved from included_dlc → steam_games.name).
-     *  Falls back to "DLC <appId>" when the DLC's own record hasn't been synced. Empty list = none. */
-    public List<String> getIncludedDlcNames(int appId) {
-        List<String> names = new ArrayList<>();
+    /** Owned DLC bundled with this game as an ordered appId → display-name map (resolved from
+     *  included_dlc → steam_games.name; falls back to "DLC <appId>"). Empty = none. Drives the
+     *  DLC picker (needs appIds to toggle) and the "Includes DLC:" line. */
+    public java.util.LinkedHashMap<Integer, String> getIncludedDlcEntries(int appId) {
+        java.util.LinkedHashMap<Integer, String> out = new java.util.LinkedHashMap<>();
         String csv;
         try (Cursor c = getReadableDatabase().rawQuery(
                 "SELECT included_dlc FROM steam_games WHERE app_id = ?",
                 new String[]{String.valueOf(appId)})) {
-            if (!c.moveToNext()) return names;
+            if (!c.moveToNext()) return out;
             csv = c.getString(0);
-        } catch (Exception e) { return names; }
-        if (csv == null || csv.isEmpty()) return names;
+        } catch (Exception e) { return out; }
+        if (csv == null || csv.isEmpty()) return out;
         for (String part : csv.split(",")) {
             String id = part.trim();
             if (id.isEmpty()) continue;
+            int dlcAppId;
+            try { dlcAppId = Integer.parseInt(id); } catch (NumberFormatException e) { continue; }
             String nm = null;
             try (Cursor c = getReadableDatabase().rawQuery(
                     "SELECT name FROM steam_games WHERE app_id = ?", new String[]{id})) {
                 if (c.moveToNext()) nm = c.getString(0);
             } catch (Exception ignored) {}
-            names.add(nm != null && !nm.isEmpty() ? nm : "DLC " + id);
+            out.put(dlcAppId, nm != null && !nm.isEmpty() ? nm : "DLC " + id);
         }
-        return names;
+        return out;
+    }
+
+    /** Display names of the owned DLC bundled with this game. Empty list = none. */
+    public List<String> getIncludedDlcNames(int appId) {
+        return new ArrayList<>(getIncludedDlcEntries(appId).values());
     }
 
     /** Mark a game as installed at the given path. */

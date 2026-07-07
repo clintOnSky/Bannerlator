@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.winlator.star.R
 import com.winlator.star.contents.AdrenotoolsManager
 import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverDownloadSheet
+import com.winlator.star.util.InAppFilePicker
 
 @Composable
 fun AdrenoToolsScreen() {
@@ -62,7 +63,8 @@ fun AdrenoToolsScreen() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
+            // In-app picker returns a path (wrapped as file:// Uri); SAF returns result.data.data.
+            (result.data?.data ?: InAppFilePicker.pickedUri(result.data))?.let { uri ->
                 val driverId = manager.installDriver(uri)
                 if (driverId.isNotEmpty()) {
                     drivers = drivers + driverId
@@ -132,16 +134,22 @@ fun AdrenoToolsScreen() {
             confirmButton = {
                 TextButton(onClick = {
                     confirmInstallPrompt = false
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "*/*"
-                    }
-                    filePicker.launch(intent)
-                }) { Text(context.getString(android.R.string.ok)) }
+                    filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.DRIVER, "Select GPU driver"))
+                }) { Text("Browse files") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmInstallPrompt = false }) {
-                    Text(context.getString(android.R.string.cancel))
+                Row {
+                    TextButton(onClick = {
+                        confirmInstallPrompt = false
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                        }
+                        filePicker.launch(intent)
+                    }) { Text("Pick via system…") }
+                    TextButton(onClick = { confirmInstallPrompt = false }) {
+                        Text(context.getString(android.R.string.cancel))
+                    }
                 }
             },
         )

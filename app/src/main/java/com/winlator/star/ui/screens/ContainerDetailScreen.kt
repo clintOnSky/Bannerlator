@@ -53,6 +53,7 @@ import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.ImageUtils
+import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WineThemeManager
 import android.graphics.Bitmap
@@ -604,15 +605,24 @@ private fun TopLevelFields(
             }
         }
 
-        // Fullscreen Stretched
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(
-                checked = viewModel.fullscreenStretched,
-                onCheckedChange = { viewModel.fullscreenStretched = it }
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.fullscreen_stretched))
-        }
+        // Fullscreen aspect-ratio mode (#71): Off (windowed letterbox) / Fit (letterbox) /
+        // Stretch (fill) / Fill (crop) / Integer (pixel-perfect). Option index maps 1:1 to
+        // Container.FULLSCREEN_OFF/FIT/STRETCH/FILL/INTEGER.
+        val fullscreenModeLabels = listOf(
+            stringResource(R.string.fullscreen_mode_off),
+            stringResource(R.string.fullscreen_mode_fit),
+            stringResource(R.string.fullscreen_mode_stretch),
+            stringResource(R.string.fullscreen_mode_fill),
+            stringResource(R.string.fullscreen_mode_integer)
+        )
+        val fsSelIdx = viewModel.fullscreenMode.coerceIn(0, fullscreenModeLabels.size - 1)
+        LabeledDropdown(
+            label = stringResource(R.string.fullscreen_mode),
+            options = fullscreenModeLabels,
+            selectedOption = fullscreenModeLabels[fsSelIdx],
+            onSelect = { viewModel.fullscreenMode = fullscreenModeLabels.indexOf(it).coerceAtLeast(0) }
+        )
+        Spacer(Modifier.height(8.dp))
 
         // Frame Generation engine: Off / bionic-fg / lsfg-vk (mutually exclusive). lsfg-vk is grayed
         // out until a Lossless.dll is imported (Settings). This is the ONLY per-container FG control;
@@ -842,10 +852,7 @@ private fun WineConfigTab(
                     } else null
                 }
 
-                val pickWallpaperLauncher = rememberLauncherForActivityResult(
-                    ActivityResultContracts.GetContent()
-                ) { uri ->
-                    uri ?: return@rememberLauncherForActivityResult
+                fun applyWallpaperFromUri(uri: Uri) {
                     ioScope.launch {
                         val ok = withContext(Dispatchers.IO) {
                             val bitmap = ImageUtils.getBitmapFromUri(context, uri, 1280)
@@ -856,6 +863,21 @@ private fun WineConfigTab(
                         if (ok) wallpaperStamp = wallpaperFile.lastModified()
                     }
                 }
+
+                // System SAF picker (secondary).
+                val pickWallpaperLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.GetContent()
+                ) { uri -> uri?.let { applyWallpaperFromUri(it) } }
+
+                // Built-in in-app image picker (primary).
+                val pickWallpaperInAppLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartActivityForResult()
+                ) { result ->
+                    if (result.resultCode == Activity.RESULT_OK) {
+                        InAppFilePicker.pickedUri(result.data)?.let { applyWallpaperFromUri(it) }
+                    }
+                }
+                var showWallpaperMenu by remember { mutableStateOf(false) }
 
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(
@@ -878,8 +900,22 @@ private fun WineConfigTab(
                         )
                         Spacer(Modifier.width(8.dp))
                     }
-                    OutlinedButton(onClick = { pickWallpaperLauncher.launch("image/*") }) {
-                        Text(if (preview != null) "Change" else "Browse")
+                    Box {
+                        OutlinedButton(onClick = { showWallpaperMenu = true }) {
+                            Text(if (preview != null) "Change" else "Browse")
+                        }
+                        DropdownMenu(expanded = showWallpaperMenu, onDismissRequest = { showWallpaperMenu = false }) {
+                            DropdownMenuItem(text = { Text("Browse files") }, onClick = {
+                                showWallpaperMenu = false
+                                pickWallpaperInAppLauncher.launch(
+                                    InAppFilePicker.buildIntent(context, InAppFilePicker.IMAGES, "Select wallpaper")
+                                )
+                            })
+                            DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
+                                showWallpaperMenu = false
+                                pickWallpaperLauncher.launch("image/*")
+                            })
+                        }
                     }
                 }
             }
