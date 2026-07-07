@@ -180,6 +180,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var showSortMenu by remember { mutableStateOf(false) }
     var showImportContainerPicker by remember { mutableStateOf(false) }
     var pendingImportContainerIndex by remember { mutableStateOf(-1) }
+    // When checked, the shortcut import uses the system SAF picker instead of the in-app File Manager.
+    var importUseSystemPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameDialogName by remember { mutableStateOf("") }
     var renameDialogContainerIndex by remember { mutableStateOf(-1) }
