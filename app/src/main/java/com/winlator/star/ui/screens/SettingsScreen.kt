@@ -104,6 +104,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
 
     var darkMode by remember { mutableStateOf(prefs.getBoolean("dark_mode", false)) }
     var bigPictureMode by remember { mutableStateOf(prefs.getBoolean("enable_big_picture_mode", false)) }
+    var showStoreFeatures by remember { mutableStateOf(prefs.getBoolean("show_store_features", true)) }
     // Default screen the app opens to: "games" (Game Shortcuts, historical default) or "containers".
     var defaultLandingScreen by remember { mutableStateOf(prefs.getString("default_landing_screen", "games") ?: "games") }
     var customApiKeyEnabled by remember { mutableStateOf(prefs.getBoolean("enable_custom_api_key", false)) }
@@ -189,6 +190,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         editor.putString("fexcore_preset", selectedFEXCorePreset)
         editor.putBoolean("dark_mode", darkMode)
         editor.putBoolean("enable_big_picture_mode", bigPictureMode)
+        editor.putBoolean("show_store_features", showStoreFeatures)
         editor.putString("default_landing_screen", defaultLandingScreen)
         editor.putBoolean("enable_custom_api_key", customApiKeyEnabled)
         if (customApiKeyEnabled) editor.putString("custom_api_key", customApiKey)
@@ -695,6 +697,15 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                     onClick = { defaultLandingScreen = "containers" },
                 )
                 Text("Containers", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            }
+        }
+
+        // ── Stores ─────────────────────────────────────────────────────
+        FieldSetLabel("Stores")
+        FieldSet {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = showStoreFeatures, onCheckedChange = { showStoreFeatures = it })
+                Text("Show store integrations (Steam, GOG, Epic, Amazon)", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
             }
         }
 
