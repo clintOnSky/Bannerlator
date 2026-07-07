@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -54,6 +54,7 @@ fun DebugDialogContent(state: XServerDialogState) {
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.9f)
                 .padding(8.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
@@ -73,7 +74,7 @@ fun DebugDialogContent(state: XServerDialogState) {
                     state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 200.dp, max = 400.dp)
+                        .weight(1f)
                 ) {
                     items(logLines) { line ->
                         Text(
