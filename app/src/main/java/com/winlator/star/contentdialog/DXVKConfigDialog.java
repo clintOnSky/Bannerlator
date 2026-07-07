@@ -125,6 +125,15 @@ public class DXVKConfigDialog {
         envVars.put("VKD3D_FEATURE_LEVEL", config.get("vkd3dLevel"));
         envVars.put("DXVK_STATE_CACHE_PATH", context.getFilesDir() + "/imagefs/" + ImageFs.CACHE_PATH);
 
+        // Co-locate the DXVK/DXGI (and VKD3D-Proton) logs in the same user-chosen folder as
+        // wine_debug.log (issue #70). These stay SEPARATE files (<app>_d3d11.log / <app>_dxgi.log /
+        // vkd3d-proton.log), just written next to the wine log instead of the game working dir.
+        java.io.File logDir = com.winlator.star.core.LogLocation.resolveLogDir(context);
+        if (logDir != null) {
+            envVars.put("DXVK_LOG_PATH", logDir.getAbsolutePath());
+            envVars.put("VKD3D_LOG_FILE", new java.io.File(logDir, "vkd3d-proton.log").getAbsolutePath());
+        }
+
         // DXVK_CONFIG_FILE (config source path, e.g. /storage/emulated/0/dxvk.conf)
         String configFile = config.get("dxvkConfigFile");
         if (configFile != null && !configFile.isEmpty() && !configFile.equals("0") && !configFile.equals("None")) {

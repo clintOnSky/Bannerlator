@@ -81,6 +81,7 @@ import com.winlator.star.contentdialog.ContentDialog
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.FileUtils
+import com.winlator.star.core.LogLocation
 import com.winlator.star.core.PreloaderDialog
 import com.winlator.star.core.UpdateManager
 import com.winlator.star.fexcore.FEXCoreEditPresetDialog
@@ -130,6 +131,8 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         (prefs.getString("wine_debug_channels", SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS) ?: SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS).split(",").toMutableList()
     ) }
     var enableBox64Logs by remember { mutableStateOf(prefs.getBoolean("enable_box64_logs", false)) }
+    var logLocationMode by remember { mutableStateOf(prefs.getString(LogLocation.PREF_MODE, LogLocation.MODE_APP_DATA) ?: LogLocation.MODE_APP_DATA) }
+    var logLocationCustomPath by remember { mutableStateOf(prefs.getString(LogLocation.PREF_CUSTOM_PATH, "") ?: "") }
     var enableFileProvider by remember { mutableStateOf(prefs.getBoolean("enable_file_provider", true)) }
     var openWithBrowser by remember { mutableStateOf(prefs.getBoolean("open_with_android_browser", false)) }
     var shareClipboard by remember { mutableStateOf(prefs.getBoolean("share_android_clipboard", false)) }
@@ -159,6 +162,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
 
     var showBox64Dropdown by remember { mutableStateOf(false) }
     var showFEXCoreDropdown by remember { mutableStateOf(false) }
+    var showLogLocationDropdown by remember { mutableStateOf(false) }
     var showSFDropdown by remember { mutableStateOf(false) }
     var showDebugChannelDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
@@ -204,6 +208,8 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         editor.putBoolean("enable_wine_debug", enableWineDebug)
         editor.putString("wine_debug_channels", wineDebugChannels.joinToString(","))
         editor.putBoolean("enable_box64_logs", enableBox64Logs)
+        editor.putString(LogLocation.PREF_MODE, logLocationMode)
+        editor.putString(LogLocation.PREF_CUSTOM_PATH, logLocationCustomPath)
         editor.putBoolean("enable_file_provider", enableFileProvider)
         editor.putBoolean("open_with_android_browser", openWithBrowser)
         editor.putBoolean("share_android_clipboard", shareClipboard)
@@ -230,6 +236,18 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
         refreshFEXCorePresets()
         refreshSF()
         onDispose { }
+    }
+
+    // Log location "Choose folder…": pick a directory via the in-app File Manager (issue #70).
+    val logLocationDirLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            InAppFilePicker.pickedPath(result.data)?.let { path ->
+                logLocationCustomPath = path
+                logLocationMode = LogLocation.MODE_CUSTOM
+            }
+        }
     }
 
     val winlatorPathLauncher = rememberLauncherForActivityResult(
@@ -835,6 +853,45 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = enableBox64Logs, onCheckedChange = { enableBox64Logs = it })
                 Text("Enable Box64 Logs", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(12.dp))
+            // ── Log location (issue #70): where wine_debug.log + DXVK/DXGI/VKD3D logs are written ──
+            Text("Log location", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            Spacer(Modifier.height(8.dp))
+            Box {
+                Button(onClick = { showLogLocationDropdown = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    modifier = Modifier.fillMaxWidth()) {
+                    val label = when (logLocationMode) {
+                        LogLocation.MODE_DOWNLOAD -> "Download (/sdcard/Download/bannerlator)"
+                        LogLocation.MODE_DOCUMENTS -> "Documents (/sdcard/Documents/bannerlator)"
+                        LogLocation.MODE_CUSTOM ->
+                            if (logLocationCustomPath.isNotEmpty()) logLocationCustomPath else "Choose folder…"
+                        else -> "App data (default)"
+                    }
+                    Text(label, color = MaterialTheme.colorScheme.onSurface)
+                }
+                DropdownMenu(expanded = showLogLocationDropdown, onDismissRequest = { showLogLocationDropdown = false }) {
+                    DropdownMenuItem(
+                        text = { Text("App data (default)") },
+                        onClick = { logLocationMode = LogLocation.MODE_APP_DATA; showLogLocationDropdown = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Download") },
+                        onClick = { logLocationMode = LogLocation.MODE_DOWNLOAD; showLogLocationDropdown = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Documents") },
+                        onClick = { logLocationMode = LogLocation.MODE_DOCUMENTS; showLogLocationDropdown = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Choose folder…") },
+                        onClick = {
+                            showLogLocationDropdown = false
+                            logLocationDirLauncher.launch(InAppFilePicker.buildDirIntent(context, "Select log folder"))
+                        }
+                    )
+                }
             }
         }
 

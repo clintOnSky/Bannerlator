@@ -1921,10 +1921,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         envVars.put("WINEDEBUG", wineDebugValue);
 
         // ── Wine debug file log ────────────────────────────────────────────────
-        // Writes all Wine stdout/stderr to a readable file.
-        // Path: /sdcard/Android/data/com.winlator.star/files/wine_debug.log
+        // Writes all Wine stdout/stderr to a readable file, in the user-chosen log folder
+        // (Settings › Logs › Log location, issue #70). Defaults to
+        // /sdcard/Android/data/com.winlator.star/files/wine_debug.log; falls back there if the
+        // chosen dir is missing/unwritable.
         try {
-            File logDir = getExternalFilesDir(null);
+            File logDir = com.winlator.star.core.LogLocation.resolveLogDir(this);
             if (logDir != null) {
                 logDir.mkdirs();
                 File logFile = new File(logDir, "wine_debug.log");

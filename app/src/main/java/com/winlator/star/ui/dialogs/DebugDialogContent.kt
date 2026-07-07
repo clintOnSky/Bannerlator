@@ -22,11 +22,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import android.widget.Toast
 import com.winlator.star.ui.XServerDialogState
 
 @Composable
@@ -34,6 +38,8 @@ fun DebugDialogContent(state: XServerDialogState) {
     val logLines  by state.logLines.collectAsState()
     val logPaused by state.logPaused.collectAsState()
     val listState = rememberLazyListState()
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
 
     LaunchedEffect(logLines.size) {
         if (logLines.isNotEmpty() && !logPaused) {
@@ -97,6 +103,13 @@ fun DebugDialogContent(state: XServerDialogState) {
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    TextButton(onClick = {
+                        // Copy the full accumulated log (incl. BCn transfer stats) to the clipboard.
+                        clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
+                        Toast.makeText(context, "Log copied", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Text("Copy")
+                    }
                     TextButton(onClick = { state.clearLog() }) {
                         Text("Clear")
                     }
