@@ -1,5 +1,6 @@
 package com.winlator.star;
 
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
@@ -52,6 +53,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
     private ControlsProfile profile;
     private CustomIconManager customIconManager;
     private ActivityResultLauncher<String> iconPickerLauncher;
+    private ActivityResultLauncher<Intent> iconPickerInAppLauncher;
     private LinearLayout currentLLCustomIconList; // To refresh UI after picking
 
     @Override
@@ -76,13 +78,40 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         container.findViewById(R.id.BTRemoveElement).setOnClickListener(this);
         container.findViewById(R.id.BTElementSettings).setOnClickListener(this);
 
-        // Initialize the file picker for custom icons
+        // Custom-icon pickers: the built-in file picker (primary) and the system SAF picker (secondary).
         iconPickerLauncher = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
-            if (uri != null && currentLLCustomIconList != null) {
-                customIconManager.addCustomIcon(uri);
-                loadCustomIcons(currentLLCustomIconList, inputControlsView.getSelectedElement().getIconId());
+            if (uri != null) addCustomIconFromUri(uri);
+        });
+        iconPickerInAppLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                String path = result.getData().getStringExtra(FilePickerActivity.EXTRA_SELECTED_FILE);
+                if (path != null) addCustomIconFromUri(Uri.fromFile(new java.io.File(path)));
             }
         });
+    }
+
+    // Shared: add a custom icon from any Uri (file:// from the in-app picker, content:// from SAF).
+    private void addCustomIconFromUri(Uri uri) {
+        if (currentLLCustomIconList != null) {
+            customIconManager.addCustomIcon(uri);
+            loadCustomIcons(currentLLCustomIconList, inputControlsView.getSelectedElement().getIconId());
+        }
+    }
+
+    // Two-option chooser: built-in picker first, then system SAF.
+    private void promptPickCustomIcon() {
+        new android.app.AlertDialog.Builder(this)
+            .setItems(new CharSequence[]{"Browse files", "Pick via system…"}, (d, which) -> {
+                if (which == 0) {
+                    Intent intent = new Intent(this, FilePickerActivity.class);
+                    intent.putExtra(FilePickerActivity.EXTRA_EXTENSIONS, new String[]{"png", "jpg", "jpeg", "webp", "bmp", "gif"});
+                    intent.putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, "Select icon image");
+                    iconPickerInAppLauncher.launch(intent);
+                } else {
+                    iconPickerLauncher.launch("image/*");
+                }
+            })
+            .show();
     }
 
     @Override
@@ -186,7 +215,7 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         if (currentLLCustomIconList != null) loadCustomIcons(currentLLCustomIconList, element.getIconId());
 
         View btAddIcon = view.findViewById(R.id.BTAddCustomIcon);
-        if (btAddIcon != null) btAddIcon.setOnClickListener(v -> iconPickerLauncher.launch("image/*"));
+        if (btAddIcon != null) btAddIcon.setOnClickListener(v -> promptPickCustomIcon());
 
         updateLayout.run();
 

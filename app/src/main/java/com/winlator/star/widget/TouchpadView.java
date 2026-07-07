@@ -18,6 +18,7 @@ import android.widget.FrameLayout;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.star.R;
+import com.winlator.star.container.Container;
 import com.winlator.star.core.AppUtils;
 import com.winlator.star.math.Mathf;
 import com.winlator.star.math.XForm;
@@ -106,11 +107,16 @@ public class TouchpadView extends View {
     }
 
     private void updateXform(int outerWidth, int outerHeight, int innerWidth, int innerHeight) {
+        int fullscreenMode = xServer.getRenderer().getFullscreenMode();
         ViewTransformation viewTransformation = new ViewTransformation();
-        viewTransformation.update(outerWidth, outerHeight, innerWidth, innerHeight);
+        viewTransformation.update(outerWidth, outerHeight, innerWidth, innerHeight, fullscreenMode);
 
         float invAspect = 1.0f / viewTransformation.aspect;
-        if (!xServer.getRenderer().isFullscreen()) {
+        // OFF/FIT/FILL/INTEGER are all uniform, aspect-preserving maps (letterbox bars for FIT/INTEGER,
+        // negative offset crop for FILL) — the inverse is subtract-offset then divide-by-aspect for all
+        // of them. Only STRETCH is non-uniform. Gate on the mode, not isFullscreen(), because
+        // isFullscreen() is now true for FIT too (#71).
+        if (fullscreenMode != Container.FULLSCREEN_STRETCH) {
             XForm.makeTranslation(xform, -viewTransformation.viewOffsetX, -viewTransformation.viewOffsetY);
             XForm.scale(xform, invAspect, invAspect);
         } else

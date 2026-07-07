@@ -28,6 +28,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -62,6 +66,8 @@ import com.winlator.star.store.compose.AddToShortcutsRequest
 import com.winlator.star.store.compose.ContainerPickerDialog
 import com.winlator.star.store.compose.openShortcutsScreen
 import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.formatDownloadSpeed
+import com.winlator.star.store.download.formatEta
 import com.winlator.star.ui.theme.WinlatorTheme
 import java.io.File
 import java.net.URL
@@ -105,8 +111,13 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
     private var sizeText by mutableStateOf("Size unknown")
     // Breakdown lines under the chips: download (compressed), PICS estimate (labeled), free space.
     private var sizeBreakdown by mutableStateOf(SizeBreakdown())
-    // "Includes DLC: <names>" — owned DLC that downloads with the game; "" hides the line.
+    // "Includes DLC: <names>" — owned DLC that WILL download (excluded ones dropped); "" hides the line.
     private var includedDlcText by mutableStateOf("")
+    // DLC picker: all owned DLC bundled with the game (appId → name), the user's opt-out set, and
+    // whether the picker sheet is open. Tapping the "Includes DLC" line opens the sheet.
+    private var dlcEntries by mutableStateOf<Map<Int, String>>(emptyMap())
+    private var excludedDlc by mutableStateOf<Set<Int>>(emptySet())
+    private var showDlcSheet by mutableStateOf(false)
     // One-shot guard so the manifest-true size resolve fires at most once per detail view.
     private var sizeResolveStarted = false
     private var statusText by mutableStateOf("Not installed")
@@ -167,6 +178,12 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                     sizeText = sizeText,
                     sizeBreakdown = sizeBreakdown,
                     includedDlcText = includedDlcText,
+                    dlcEntries = dlcEntries,
+                    excludedDlc = excludedDlc,
+                    showDlcSheet = showDlcSheet,
+                    onDlcLineClick = { if (dlcEntries.isNotEmpty()) showDlcSheet = true },
+                    onToggleDlc = { toggleDlc(it) },
+                    onDismissDlcSheet = { showDlcSheet = false },
                     statusText = statusText,
                     gameStatus = gameStatus,
                     installBtnText = installBtnText,
@@ -289,7 +306,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                 steamStatus = try { SteamRepository.SteamStatus.valueOf(name) } catch (e: Exception) { steamStatus }
             }
             event.startsWith("DownloadProgress:") -> {
-                // Format: DownloadProgress:appId:installDone:installTotal:downloadDone:downloadTotal
+                // Format: DownloadProgress:appId:installDone:installTotal:downloadDone:downloadTotal:etaSec:speedBps
                 val parts = event.split(":")
                 val id    = parts.getOrNull(1)?.toIntOrNull() ?: return
                 if (id != appId) return
@@ -297,14 +314,20 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                 val iTotal = parts.getOrNull(3)?.toLongOrNull() ?: 1L
                 val dDone  = parts.getOrNull(4)?.toLongOrNull() ?: iDone
                 val dTotal = parts.getOrNull(5)?.toLongOrNull() ?: iTotal
+                val etaSec = parts.getOrNull(6)?.toLongOrNull() ?: -1L
+                val speed  = parts.getOrNull(7)?.toLongOrNull() ?: 0L
                 val iPct   = if (iTotal > 0) (iDone * 100 / iTotal).toInt().coerceIn(0, 100) else 0
                 val dPct   = if (dTotal > 0) (dDone * 100 / dTotal).toInt().coerceIn(0, 100) else 0
                 progressVisible = true
                 progressValue = iPct               // solid install fill (bytes on disk)
                 downloadProgressValue = dPct        // lighter download fill (bytes fetched)
                 progressTextVisible = true
-                // %/size text is the INSTALL fraction — what's actually on disk.
-                progressText = "Downloading… $iPct%  (${fmtSize(iDone)} / ${fmtSize(iTotal)})"
+                // %/size text is the INSTALL fraction — what's actually on disk; append speed + ETA.
+                val speedEta = buildString {
+                    val s = formatDownloadSpeed(speed); if (s.isNotEmpty()) append("  ·  $s")
+                    val e = formatEta(etaSec);          if (e.isNotEmpty()) append("  ·  $e")
+                }
+                progressText = "Downloading… $iPct%  (${fmtSize(iDone)} / ${fmtSize(iTotal)})$speedEta"
                 installBtnEnabled = true
                 installBtnText = "Cancel"
                 installAction = InstallAction.CANCEL
@@ -396,34 +419,79 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
      * installed game the estimate is replaced by the REAL measured footprint (async, best-effort).
      */
     private fun refreshSizeUi(g: SteamGame) {
-        val cs = try { DepotSizeResolver.cached(g.appId) } catch (_: Throwable) { null }
-        val resolved   = cs != null && cs.complete
-        val picsInstall = g.sizeBytes
-        val footprint  = if (resolved && cs!!.realDiskBytes > 0L) cs.realDiskBytes else picsInstall
+        recomputeSizeDisplay(g)
+        maybeResolveRealSize()
+        if (g.isInstalled && g.installDir.isNotEmpty()) measureInstalledFootprint(g)
+    }
 
-        // Headline: real footprint (no "~") once resolved, else the PICS-based estimate.
+    /**
+     * Pure recompute of the size chips/breakdown from the depot rows, DROPPING any DLC the user opted
+     * out of — so unchecking DLC lowers the shown download / on-disk / PICS numbers live. Sums per
+     * depot (real sizes where resolved, PICS otherwise) instead of the app-level totals so exclusions
+     * are honoured. Safe to call on the UI thread (pure DB read).
+     */
+    private fun recomputeSizeDisplay(g: SteamGame) {
+        val rows = try { SteamRepository.getInstance().database.getDepotManifests(g.appId) } catch (_: Throwable) { emptyList() }
+        val kept = rows.filter { it.depotId !in excludedDlc }
+        var pics = 0L; var install = 0L; var download = 0L; var disk = 0L
+        var anyResolved = false; var allResolved = kept.isNotEmpty()
+        for (r in kept) {
+            pics += r.sizeBytes
+            if (r.realSizeBytes > 0L) {
+                anyResolved = true
+                install  += r.realSizeBytes
+                download += r.realDownloadBytes
+                disk     += if (r.realDiskBytes > 0L) r.realDiskBytes else r.realSizeBytes
+            } else {
+                allResolved = false
+                install += r.sizeBytes
+                disk    += r.sizeBytes
+            }
+        }
+        // Empty depot table (not synced) → fall back to the app-level PICS size.
+        if (rows.isEmpty()) { pics = g.sizeBytes; disk = g.sizeBytes }
+        val resolved  = allResolved && anyResolved
+        val footprint = if (resolved && disk > 0L) disk else pics
+
         sizeText = when {
             footprint > 0L && resolved -> "${fmtSize(footprint)} on disk"
             footprint > 0L             -> "~${fmtSize(footprint)} on disk"
             else                       -> "Size unknown"
         }
 
-        // Download (compressed) — resolved value if sane (0 < download <= install), else PICS estimate.
-        val resolvedDownload = cs?.realDownloadBytes ?: 0L
-        val downloadBytes = if (resolvedDownload in 1..maxOf(picsInstall, resolvedDownload)) resolvedDownload
+        // Download (compressed): the resolved per-depot sum is exclusion-aware; before resolve fall
+        // back to the app-level PICS download estimate (not exclusion-aware, shown only until resolve).
+        val downloadBytes = if (resolved && download in 1..maxOf(pics, download)) download
                             else try { SteamRepository.getInstance().getSelectedDownloadSize(g.appId) } catch (_: Throwable) { 0L }
 
         val free = try { freeInstallBytes() } catch (_: Throwable) { -1L }
-        // "Won't fit" only matters before install (an installed game already fits).
         val fits = g.isInstalled || free < 0L || footprint <= 0L || free >= footprint
         sizeBreakdown = SizeBreakdown(
             downloadLabel = if (downloadBytes > 0L) "Download: ${fmtSize(downloadBytes)}" else "",
-            picsLabel     = if (picsInstall > 0L)   "PICS estimate (Steam): ${fmtSize(picsInstall)}" else "",
+            picsLabel     = if (pics > 0L) "PICS estimate (Steam): ${fmtSize(pics)}" else "",
             freeLabel     = if (free >= 0L) "Free space: ${fmtSize(free)}" + (if (!fits) " — won't fit" else "") else "",
             fits          = fits,
         )
+    }
 
-        if (g.isInstalled && g.installDir.isNotEmpty()) measureInstalledFootprint(g)
+    /** The "Includes DLC:" label from the owned DLC minus the user's opt-outs. "" hides the line
+     *  (no owned DLC); "DLC: none selected" when everything's unchecked (keeps the line tappable). */
+    private fun buildIncludedDlcText(): String {
+        if (dlcEntries.isEmpty()) return ""
+        val included = dlcEntries.filterKeys { it !in excludedDlc }.values
+        return if (included.isEmpty()) "DLC: none selected"
+               else "Includes DLC: " + included.joinToString(", ")
+    }
+
+    /** Toggle a DLC's opt-out state, persist it, and refresh the line. */
+    private fun toggleDlc(dlcAppId: Int) {
+        val g = game ?: return
+        val next = excludedDlc.toMutableSet()
+        if (dlcAppId in next) next.remove(dlcAppId) else next.add(dlcAppId)
+        excludedDlc = next
+        try { SteamPrefs.setExcludedDlc(g.appId, next) } catch (_: Throwable) {}
+        includedDlcText = buildIncludedDlcText()
+        recomputeSizeDisplay(g)   // drop the unticked DLC from the shown download/on-disk/PICS sizes
     }
 
     /** Available bytes on the partition the games install to. */
@@ -511,10 +579,9 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
         // "~estimate". A background resolve then drops the "~" once the real size lands. cached() is a
         // pure DB read; resolve() is gated off the UI thread + off active downloads inside the resolver.
         refreshSizeUi(g)
-        includedDlcText = try {
-            val names = SteamRepository.getInstance().database.getIncludedDlcNames(g.appId)
-            if (names.isEmpty()) "" else "Includes DLC: " + names.joinToString(", ")
-        } catch (_: Throwable) { "" }
+        dlcEntries = try { SteamRepository.getInstance().database.getIncludedDlcEntries(g.appId) } catch (_: Throwable) { emptyMap() }
+        excludedDlc = try { SteamPrefs.getExcludedDlc(g.appId) } catch (_: Throwable) { emptySet() }
+        includedDlcText = buildIncludedDlcText()
         maybeResolveRealSize()
 
         if (g.isInstalled) {
@@ -726,6 +793,7 @@ private data class ExePickerDataGame(
 
 // --- Composable Screens ---
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun SteamGameDetailScreen(
     headerBitmap: Bitmap?,
@@ -736,6 +804,12 @@ private fun SteamGameDetailScreen(
     sizeText: String,
     sizeBreakdown: SizeBreakdown,
     includedDlcText: String,
+    dlcEntries: Map<Int, String>,
+    excludedDlc: Set<Int>,
+    showDlcSheet: Boolean,
+    onDlcLineClick: () -> Unit,
+    onToggleDlc: (Int) -> Unit,
+    onDismissDlcSheet: () -> Unit,
     statusText: String,
     gameStatus: GameStatus,
     installBtnText: String,
@@ -865,7 +939,7 @@ private fun SteamGameDetailScreen(
                     )
                 }
             }
-            // Owned DLC that downloads alongside the game.
+            // Owned DLC that downloads alongside the game — with a clear button to choose which.
             if (includedDlcText.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -873,6 +947,12 @@ private fun SteamGameDetailScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
+                OutlinedButton(
+                    onClick = onDlcLineClick,
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    Text("Choose DLC")
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(
@@ -981,6 +1061,56 @@ private fun SteamGameDetailScreen(
                 onDownloadClick = onGoldbergDownloadClick,
                 onModeSelected = onGoldbergModeSelected,
             )
+        }
+    }
+
+    // DLC picker sheet — choose which owned DLC download with the game (opt-out).
+    if (showDlcSheet) {
+        val sheetState = rememberModalBottomSheetState()
+        ModalBottomSheet(onDismissRequest = onDismissDlcSheet, sheetState = sheetState) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            ) {
+                Text(
+                    text = "DLC to download",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "Unchecked DLC won't download with the game.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+                )
+                dlcEntries.forEach { (id, name) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggleDlc(id) }
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Checkbox(checked = id !in excludedDlc, onCheckedChange = { onToggleDlc(id) })
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onDismissDlcSheet,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("Done") }
+            }
         }
     }
 }

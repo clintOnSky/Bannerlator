@@ -8,6 +8,8 @@ import com.winlator.star.store.download.DownloadEntry
 import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.formatDownloadSpeed
+import com.winlator.star.store.download.formatEta
 import `in`.dragonbra.javasteam.depotdownloader.DepotDownloader
 import `in`.dragonbra.javasteam.depotdownloader.IDownloadListener
 import `in`.dragonbra.javasteam.depotdownloader.data.AppItem
@@ -348,18 +350,29 @@ object SteamDepotDownloader {
         // (the b8e9e5b grow-the-denominator band-aid then only ever acts as a backstop). Fall back to
         // the PICS estimate, then to the per-depot PICS sum. A resolved real size counts as hasPicsSize
         // (a valid known total → no need to back-calculate from chunk fractions).
+        // Exclusion-aware denominators: sum only the depots this download will actually pull (drop the
+        // DLC the user opted out of) so the progress bar tracks the real, reduced download instead of
+        // stalling at ~85% then jumping to done.
+        val excludedForDenom = try { SteamPrefs.getExcludedDlc(appId) } catch (_: Throwable) { emptySet() }
+        val keptDepotRows = try { db.getDepotManifests(appId).filter { it.depotId !in excludedForDenom } }
+                            catch (_: Throwable) { emptyList() }
+        val keptReal = if (keptDepotRows.isNotEmpty() && keptDepotRows.all { it.realSizeBytes > 0L })
+                           keptDepotRows.sumOf { it.realSizeBytes } else 0L
+        val keptPics = keptDepotRows.sumOf { it.sizeBytes }
         val realGameSize = try { db.getGameRealSize(appId) } catch (_: Throwable) { 0L }
         val hasPicsSize: Boolean
         val installTotal: Long = when {
-            realGameSize  > 0L -> { hasPicsSize = true;  realGameSize }
+            keptReal > 0L      -> { hasPicsSize = true;  keptReal }          // manifest-true, exclusion-aware
+            keptPics > 0L      -> { hasPicsSize = true;  keptPics }          // PICS sum, exclusion-aware
+            realGameSize  > 0L -> { hasPicsSize = true;  realGameSize }      // fallbacks (no depot rows)
             row.sizeBytes > 0L -> { hasPicsSize = true;  row.sizeBytes }
-            else               -> { hasPicsSize = false
-                db.getDepotManifests(appId).sumOf { it.sizeBytes }.let { if (it > 0L) it else 1L } }
+            else               -> { hasPicsSize = false; 1L }
         }
-        // Compressed (network) total for the download bar. In-memory cache populated by
-        // library sync; on a cache miss (resume in a fresh process without a re-sync) fall
-        // back to the install total so the bar still has a sane denominator.
-        val cachedDownload = repo.getSelectedDownloadSize(appId)
+        // Compressed (network) total for the download bar: kept depots' resolved compressed sizes when
+        // available (exclusion-aware), else the app-level PICS download cache, else the install total.
+        val keptDownload = if (keptDepotRows.isNotEmpty() && keptDepotRows.all { it.realDownloadBytes > 0L })
+                               keptDepotRows.sumOf { it.realDownloadBytes } else 0L
+        val cachedDownload = if (keptDownload > 0L) keptDownload else repo.getSelectedDownloadSize(appId)
         val downloadTotalSeed: Long = if (cachedDownload > 0L) cachedDownload else installTotal
         dlog("Denominators: install=${fmtSize(installTotal)} download=${fmtSize(downloadTotalSeed)} " +
                 "(hasPicsSize=$hasPicsSize, cachedDownload=$cachedDownload)")
@@ -421,9 +434,11 @@ object SteamDepotDownloader {
             DownloadRegistry.update(dmKey) { it.copy(state = DownloadState.DOWNLOADING) }
         }
 
-        // Build the 4-field progress event: install pair + download pair.
-        fun emitProgress(iDone: Long, iTotal: Long, dDone: Long, dTotal: Long) {
-            repo.emit("DownloadProgress:$appId:$iDone:$iTotal:$dDone:$dTotal")
+        // Build the progress event: install pair + download pair + ETA(sec) + speed(bytes/s).
+        // etaSeconds < 0 = unknown (not yet measured / paused); speedBps 0 = unknown.
+        fun emitProgress(iDone: Long, iTotal: Long, dDone: Long, dTotal: Long,
+                         etaSeconds: Long = -1L, speedBps: Long = 0L) {
+            repo.emit("DownloadProgress:$appId:$iDone:$iTotal:$dDone:$dTotal:$etaSeconds:$speedBps")
         }
 
         // Derive the three pipeline-stage caps from CPU cores × the selected tier's ratios
@@ -472,6 +487,14 @@ object SteamDepotDownloader {
         val gotDepotKeyOrChunk = AtomicBoolean(false)
         // Throttle FGS notification updates to whole-percent changes (chunks fire far too often).
         val lastNotifiedPct = AtomicInteger(-1)
+
+        // Smoothed download speed + ETA. Chunk callbacks fire many times/sec and can be concurrent,
+        // so sample the compressed-byte rate at most once/sec under a lock and feed it through an EMA
+        // (a raw remaining/instant-speed ETA flickers wildly). smoothedBps 0 / eta -1 = unknown.
+        val rateLock = Any()
+        var smoothedBps = 0.0
+        var lastRateMs = System.currentTimeMillis()
+        var lastRateBytes = downloadBase
 
         downloader.addListener(object : IDownloadListener {
             override fun onDownloadStarted(item: DownloadItem) {
@@ -523,9 +546,31 @@ object SteamDepotDownloader {
                 // Overall % is the aggregate install fraction (what's actually on disk),
                 // clamped to 99 — 100% is reserved for onDownloadCompleted.
                 val pct = if (iTotal > 0L) minOf((installDone * 100 / iTotal).toInt(), 99) else 0
+
+                // Smoothed speed + ETA from the compressed-byte rate (network is what "time left" means).
+                var etaSeconds = -1L
+                var speedBps = 0L
+                synchronized(rateLock) {
+                    val now = System.currentTimeMillis()
+                    val dtMs = now - lastRateMs
+                    if (dtMs >= 1000L) {
+                        val delta = downloadDone - lastRateBytes
+                        if (delta > 0L) {
+                            val inst = delta * 1000.0 / dtMs
+                            smoothedBps = if (smoothedBps <= 0.0) inst else 0.6 * smoothedBps + 0.4 * inst
+                        }
+                        lastRateMs = now
+                        lastRateBytes = downloadDone
+                    }
+                    speedBps = smoothedBps.toLong()
+                    if (smoothedBps > 0.0 && dTotal > downloadDone) {
+                        etaSeconds = ((dTotal - downloadDone) / smoothedBps).toLong()
+                    }
+                }
+
                 dlog("Chunk: depot=$depotId $pct% install=${fmtSize(installDone)}/${fmtSize(iTotal)} " +
                         "download=${fmtSize(downloadDone)}/${fmtSize(dTotal)}")
-                emitProgress(installDone, iTotal, downloadDone, dTotal)
+                emitProgress(installDone, iTotal, downloadDone, dTotal, etaSeconds, speedBps)
                 db.updateDownloadProgress(appId, installDone)
                 // Mirror the exact same figures into the Download Manager registry (no recompute).
                 DownloadRegistry.update(dmKey) {
@@ -536,14 +581,20 @@ object SteamDepotDownloader {
                         installTotal = iTotal,
                         downloadDone = downloadDone,
                         downloadTotal = dTotal,
+                        etaSeconds = etaSeconds,
+                        speedBps = speedBps,
                     )
                 }
 
-                // FGS notification: honest "Downloading <game> — N%", throttled to whole-percent
-                // changes so chunk spam doesn't thrash the notification. Reverted to the connection
-                // status in the finally (repo.refreshFgsStatus()). Static no-op if the FGS is down.
+                // FGS notification: "Downloading <game> — N% · <speed> · <eta>", throttled to
+                // whole-percent changes so chunk spam doesn't thrash the notification. Reverted to the
+                // connection status in the finally (repo.refreshFgsStatus()). No-op if the FGS is down.
                 if (lastNotifiedPct.getAndSet(pct) != pct) {
-                    try { SteamForegroundService.setStatusText("Downloading ${row.name} — $pct%") }
+                    val extra = buildString {
+                        if (speedBps > 0L)    append(" · ${formatDownloadSpeed(speedBps)}")
+                        if (etaSeconds >= 0L) append(" · ${formatEta(etaSeconds)}")
+                    }
+                    try { SteamForegroundService.setStatusText("Downloading ${row.name} — $pct%$extra") }
                     catch (_: Throwable) {}
                 }
             }
@@ -580,9 +631,19 @@ object SteamDepotDownloader {
                 // fall back to the PICS estimate only when the real size is UNRESOLVED — and even then
                 // we relax, never tighten: if every selected depot delivered bytes (no skipped depot),
                 // trust the engine's completion rather than reject on the unreliable PICS number.
-                val realExpected = try {
-                    DepotSizeResolver.cached(appId)?.takeIf { it.complete && it.realInstallBytes > 0L }?.realInstallBytes
-                } catch (_: Throwable) { null }
+                // Honour DLC opt-outs: judge completion against ONLY the depots this download actually
+                // pulled. Excluded DLC depots aren't fetched, so they must not count toward the expected
+                // size or the "every depot delivered" check — otherwise opting out of DLC would falsely
+                // fail an otherwise-complete install (self-inflicted version of the See No Evil bug).
+                val excluded = try { SteamPrefs.getExcludedDlc(appId) } catch (_: Throwable) { emptySet() }
+                val keptRows = try { db.getDepotManifests(appId).filter { it.depotId !in excluded } }
+                               catch (_: Throwable) { emptyList() }
+                // Manifest-true expected = sum of KEPT depots' real sizes, only when every kept depot
+                // resolved. (Replaces DepotSizeResolver.cached() which sums ALL selected depots.)
+                val realExpected: Long? =
+                    if (keptRows.isNotEmpty() && keptRows.all { it.realSizeBytes > 0L })
+                        keptRows.sumOf { it.realSizeBytes }.takeIf { it > 0L }
+                    else null
 
                 if (realExpected != null) {
                     // True size known → authoritative 90% check. 313830 → 130/130 passes; a real skip
@@ -594,23 +655,26 @@ object SteamDepotDownloader {
                         return
                     }
                     dlog("Complete: ${fmtSize(finalInstall)} of ${fmtSize(realExpected)} manifest-true (≥90%)")
-                } else if (iTotal > 0L && finalInstall < (iTotal * 90L / 100L)) {
-                    // Real size unresolved → today's PICS guard, RELAXED (never stricter): a genuine
-                    // truncation skips a whole depot, which shows up as a SELECTED depot with zero bytes
-                    // delivered. If every selected depot delivered something, the shortfall vs the PICS
-                    // estimate is a PICS over-report, not a skip — trust the engine's completion.
-                    val selectedDepots: List<Int> = try { db.getDepotManifests(appId).map { it.depotId } }
-                                         catch (_: Throwable) { emptyList() }
-                    val everyDepotDelivered = selectedDepots.isNotEmpty() &&
-                            selectedDepots.all { (installByDepot[it] ?: 0L) > 0L }
-                    if (!everyDepotDelivered) {
-                        dlog("INCOMPLETE: only ${fmtSize(finalInstall)} of ${fmtSize(iTotal)} PICS-est on disk " +
-                                "(<90%) and a selected depot delivered nothing — refusing to mark installed")
-                        emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(iTotal)}) — please retry")
-                        return
+                } else {
+                    // Real size unresolved → PICS guard, RELAXED (never stricter): a genuine truncation
+                    // skips a whole depot, showing up as a KEPT depot with zero bytes delivered. If every
+                    // kept depot delivered something, the shortfall vs the PICS estimate is a PICS
+                    // over-report, not a skip — trust the engine's completion. Expected uses KEPT depots'
+                    // PICS sizes (exclusion-aware), falling back to the running total if unavailable.
+                    val picsExpected = keptRows.sumOf { it.sizeBytes }.takeIf { it > 0L } ?: iTotal
+                    if (picsExpected > 0L && finalInstall < (picsExpected * 90L / 100L)) {
+                        val selectedDepots: List<Int> = keptRows.map { it.depotId }
+                        val everyDepotDelivered = selectedDepots.isNotEmpty() &&
+                                selectedDepots.all { (installByDepot[it] ?: 0L) > 0L }
+                        if (!everyDepotDelivered) {
+                            dlog("INCOMPLETE: only ${fmtSize(finalInstall)} of ${fmtSize(picsExpected)} PICS-est on disk " +
+                                    "(<90%) and a selected depot delivered nothing — refusing to mark installed")
+                            emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(picsExpected)}) — please retry")
+                            return
+                        }
+                        dlog("Complete: ${fmtSize(finalInstall)} < 90% of PICS-est ${fmtSize(picsExpected)} but all " +
+                                "${selectedDepots.size} kept depot(s) delivered — trusting completion (PICS over-report)")
                     }
-                    dlog("Complete: ${fmtSize(finalInstall)} < 90% of PICS-est ${fmtSize(iTotal)} but all " +
-                            "${selectedDepots.size} selected depot(s) delivered — trusting completion (PICS over-report)")
                 }
 
                 // Both bars reach 100% before switching to installed state.
@@ -645,6 +709,24 @@ object SteamDepotDownloader {
             }
         })
 
+        // DLC picker: DLC the user opted out of (appId == depot id). When non-empty we hand the
+        // engine an EXPLICIT depot list (our filtered selection minus the excluded DLC) instead of
+        // letting it auto-resolve — so the unchecked DLC simply isn't downloaded. Default (nothing
+        // excluded) → empty lists → engine auto-resolves exactly as before.
+        val excludedDlc = try { SteamPrefs.getExcludedDlc(appId) } catch (_: Throwable) { emptySet() }
+        val explicitDepots: List<Int>
+        val explicitManifests: List<Long>
+        if (excludedDlc.isNotEmpty()) {
+            val kept = try { db.getDepotManifests(appId).filter { it.depotId !in excludedDlc && it.manifestId != 0L } }
+                       catch (_: Throwable) { emptyList() }
+            explicitDepots   = kept.map { it.depotId }
+            explicitManifests = kept.map { it.manifestId }
+            dlog("DLC opt-out: excluding ${excludedDlc.joinToString(",")} → downloading ${explicitDepots.size} depot(s) explicitly")
+        } else {
+            explicitDepots = emptyList()
+            explicitManifests = emptyList()
+        }
+
         val item = AppItem(
             appId = appId,
             installDirectory = installDir.absolutePath,
@@ -656,8 +738,11 @@ object SteamDepotDownloader {
             // of what os.arch returns on this Android device (arm64, aarch64, armv8l, etc.).
             // Wine/Box64 handles x86_64 translation; arch mismatch would filter all depots.
             downloadAllArchs = true,
+            depot = explicitDepots,
+            manifest = explicitManifests,
         )
-        dlog("Adding AppItem: appId=${item.appId} branch=${item.branch} dir=${item.installDirectory}")
+        dlog("Adding AppItem: appId=${item.appId} branch=${item.branch} dir=${item.installDirectory}" +
+             if (explicitDepots.isNotEmpty()) " depots=${explicitDepots.size}(explicit)" else "")
         downloader.add(item)
         downloader.finishAdding()
 

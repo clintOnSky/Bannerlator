@@ -2,6 +2,7 @@ package com.winlator.star.ui.screens
 
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -90,6 +91,7 @@ import com.winlator.star.container.Shortcut
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameSaveBackup
+import com.winlator.star.util.InAppFilePicker
 import com.winlator.star.core.SaveLocator
 import com.winlator.star.core.StringUtils
 import com.winlator.star.store.UninstallResultBar
@@ -143,15 +145,27 @@ fun ContainersScreen(
     var resultMessage by remember { mutableStateOf<String?>(null) }
     var pendingRestoreContainer by remember { mutableStateOf<Container?>(null) }
 
-    // SAF picker for choosing a GameHub backup .zip to restore.
-    val restorePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
+    // Restore a GameHub backup .zip. Shared for both the in-app picker (file:// path) and SAF.
+    fun handleRestoreUri(uri: Uri?) {
         val target = pendingRestoreContainer
         pendingRestoreContainer = null
         if (uri != null && target != null) {
             saveFlow = SaveFlow.Confirm(target, uri, GameSaveBackup.gameNameFromUri(context, uri))
         }
+    }
+
+    // System SAF picker (secondary).
+    val restorePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri -> handleRestoreUri(uri) }
+
+    // Built-in in-app file picker (primary).
+    val restoreInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        handleRestoreUri(
+            if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data) else null
+        )
     }
 
     val topBarActions = LocalTopBarActions.current
@@ -354,10 +368,20 @@ fun ContainersScreen(
                         onClick = {
                             pendingRestoreContainer = flow.container
                             saveFlow = null
-                            restorePickerLauncher.launch("application/zip")
+                            restoreInAppLauncher.launch(
+                                InAppFilePicker.buildIntent(context, InAppFilePicker.SAVE, "Select backup (.zip)")
+                            )
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("GameHub backup (.zip)", modifier = Modifier.weight(1f)) }
+                    TextButton(
+                        onClick = {
+                            pendingRestoreContainer = flow.container
+                            saveFlow = null
+                            restorePickerLauncher.launch("application/zip")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Pick via system…", modifier = Modifier.weight(1f)) }
                 }
             },
             confirmButton = { TextButton(onClick = { saveFlow = SaveFlow.Fork(flow.container) }) { Text("Back") } },

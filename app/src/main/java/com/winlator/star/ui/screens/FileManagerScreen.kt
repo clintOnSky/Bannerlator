@@ -75,8 +75,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -102,6 +105,9 @@ import java.util.Locale
 private val FileTypeIcon: Map<String, ImageVector> = mapOf(
     "folder" to Icons.Filled.Folder,
 )
+
+// Image extensions that get a real thumbnail (via Coil) instead of the generic file icon.
+private val IMAGE_THUMB_EXTS = setOf("jpg", "jpeg", "png", "webp", "bmp", "gif")
 
 // Color-only sweep: the former card-fill / card-stroke / divider / icon-blue / icon-white
 // constants were rerouted onto MaterialTheme.colorScheme tokens (surface / outline / primary /
@@ -185,7 +191,16 @@ private fun badgeColors(loc: FavLocation): Pair<Color, Color> {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileManagerScreen() {
+fun FileManagerScreen(
+    // Pick mode (issue #73): reuse this File Manager as a themed file picker. When on, editing/run
+    // features are gated off and tapping a matching file returns it via [onPick]. Defaults keep the
+    // full-featured File Manager nav destination unchanged.
+    pickMode: Boolean = false,
+    pickExtensions: List<String> = emptyList(),
+    initialDir: File? = null,
+    pickerTitle: String? = null,
+    onPick: ((File) -> Unit)? = null,
+) {
     val context = LocalContext.current
     val activity = context as? Activity
     val mainActivity = context as? MainActivity
@@ -195,7 +210,24 @@ fun FileManagerScreen() {
     val containers = remember { containerManager?.getContainers()?.toList() ?: emptyList<Container>() }
     val imagefsDir = remember { File(context.filesDir, "imagefs") }
 
-    val rootDir = File("/storage/emulated/0")
+    // Only matching files are shown in pick mode (directories are always shown). Empty = all files.
+    val lowerExts = remember(pickExtensions) { pickExtensions.map { it.lowercase() } }
+    fun matchesPickExt(file: File): Boolean {
+        if (lowerExts.isEmpty()) return true
+        val name = file.name.lowercase()
+        return lowerExts.any { name.endsWith(".$it") }
+    }
+
+    val pickPrefs = remember { androidx.preference.PreferenceManager.getDefaultSharedPreferences(context) }
+    val rootDir = remember {
+        if (pickMode) {
+            val remembered = pickPrefs.getString("lastFilePickerDir", null)?.let { File(it) }?.takeIf { it.isDirectory }
+            initialDir?.takeIf { it.isDirectory }
+                ?: remembered
+                ?: File("/sdcard/Download/").takeIf { it.isDirectory }
+                ?: File("/storage/emulated/0")
+        } else File("/storage/emulated/0")
+    }
 
     var currentDir by remember { mutableStateOf(rootDir) }
     var currentRoot by remember { mutableStateOf(rootDir) }
@@ -223,11 +255,15 @@ fun FileManagerScreen() {
     // after delete/paste/rename/refresh so the user keeps their scroll position).
     fun loadDirectory(dir: File, resetScroll: Boolean = true) {
         currentDir = dir
+        // Remember the browsed directory so the next pick resumes here.
+        if (pickMode) pickPrefs.edit().putString("lastFilePickerDir", dir.absolutePath).apply()
         scope.launch {
             val list = withContext(Dispatchers.IO) {
-                dir.listFiles()?.toList()?.sortedWith(
-                    compareBy<File> { if (it.isDirectory) 0 else 1 }.thenBy { it.name.lowercase() }
-                ) ?: emptyList()
+                dir.listFiles()?.toList()
+                    ?.filter { !pickMode || it.isDirectory || matchesPickExt(it) }
+                    ?.sortedWith(
+                        compareBy<File> { if (it.isDirectory) 0 else 1 }.thenBy { it.name.lowercase() }
+                    ) ?: emptyList()
             }
             entries = list
             if (resetScroll) listState.scrollToItem(0)
@@ -561,6 +597,19 @@ fun FileManagerScreen() {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // ── Pick-mode title ──
+        if (pickMode && !pickerTitle.isNullOrEmpty()) {
+            Text(
+                text = pickerTitle,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainer)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            )
+        }
         // ── Path bar ──
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -769,8 +818,15 @@ fun FileManagerScreen() {
                         }
                         FileItemRow(
                             file = file,
+                            showActions = !pickMode,
                             onTap = {
                                 if (file.isDirectory) loadDirectory(file)
+                                else if (pickMode) {
+                                    if (matchesPickExt(file)) {
+                                        pickPrefs.edit().putString("lastFilePickerDir", currentDir.absolutePath).apply()
+                                        onPick?.invoke(file)
+                                    }
+                                }
                                 else if (canRun(file)) runFile(file)
                             },
                             onMenu = { showMenuFor = file },
@@ -808,21 +864,23 @@ fun FileManagerScreen() {
         }
         }
 
-        // ── FAB area ──
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainer)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            OutlinedButton(
-                onClick = { showNewFolderDialog = true },
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        // ── FAB area ── (creation is gated off in pick mode)
+        if (!pickMode) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainer)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Icon(Icons.Filled.CreateNewFolder, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(6.dp))
-                Text("New Folder", color = MaterialTheme.colorScheme.onBackground)
+                OutlinedButton(
+                    onClick = { showNewFolderDialog = true },
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                ) {
+                    Icon(Icons.Filled.CreateNewFolder, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(6.dp))
+                    Text("New Folder", color = MaterialTheme.colorScheme.onBackground)
+                }
             }
         }
     }
@@ -831,6 +889,7 @@ fun FileManagerScreen() {
 @Composable
 private fun FileItemRow(
     file: File,
+    showActions: Boolean = true,
     onTap: () -> Unit,
     onMenu: () -> Unit,
     menuExpanded: Boolean,
@@ -847,6 +906,9 @@ private fun FileItemRow(
     val isDir = file.isDirectory
     val canRun = isDir || file.name.lowercase().let { it.endsWith(".exe") || it.endsWith(".bat") || it.endsWith(".msi") || it.endsWith(".sh") }
     val isExe = !isDir && file.name.lowercase().let { it.endsWith(".exe") || it.endsWith(".bat") || it.endsWith(".msi") || it.endsWith(".sh") }
+    // Image files show a real thumbnail instead of the generic file icon (handy when picking a
+    // wallpaper/icon). Coil sizes the decode to the 36dp slot and caches it, so scrolling stays smooth.
+    val isImage = !isDir && file.extension.lowercase() in IMAGE_THUMB_EXTS
 
     // For real PE executables, try to pull out the embedded application icon (async, off the main thread).
     var exeIcon by remember(file.absolutePath) { mutableStateOf<ImageBitmap?>(null) }
@@ -889,6 +951,17 @@ private fun FileItemRow(
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(36.dp),
                 )
+                // Real image preview. Falls back to the generic file icon while loading or on decode failure.
+                isImage -> AsyncImage(
+                    model = file,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    placeholder = rememberVectorPainter(Icons.Filled.InsertDriveFile),
+                    error = rememberVectorPainter(Icons.Filled.InsertDriveFile),
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                )
                 else -> Icon(
                     imageVector = Icons.Filled.InsertDriveFile,
                     contentDescription = null,
@@ -915,7 +988,7 @@ private fun FileItemRow(
                     fontSize = 11.sp,
                 )
             }
-            Box {
+            if (showActions) Box {
                 IconButton(onClick = onMenu) {
                     Icon(Icons.Filled.MoreVert, "Actions", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 }

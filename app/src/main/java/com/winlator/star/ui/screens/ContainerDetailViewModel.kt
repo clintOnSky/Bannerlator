@@ -99,7 +99,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     var showFPS by mutableStateOf(false)
     var fpsCounterConfig by mutableStateOf(Container.DEFAULT_FPS_COUNTER_CONFIG)
-    var fullscreenStretched by mutableStateOf(false)
+    // Fullscreen aspect-ratio mode (#71): Container.FULLSCREEN_OFF/FIT/STRETCH.
+    var fullscreenMode by mutableStateOf(Container.FULLSCREEN_OFF)
 
     // Frame-gen engine (per-container): "off" | "bionic" | "lsfg" (mutually exclusive).
     // multiplier & flow scale are tuned live from the in-game side menu (bionic-fg).
@@ -328,7 +329,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
         showFPS           = c?.isShowFPS == true
         fpsCounterConfig  = c?.getFPSCounterConfig() ?: Container.DEFAULT_FPS_COUNTER_CONFIG
-        fullscreenStretched = c?.isFullscreenStretched == true
+        fullscreenMode      = c?.getFullscreenMode() ?: Container.FULLSCREEN_OFF
 
         frameGenEngine     = c?.frameGenEngine ?: "off"
         fpsLimiterEnabled  = c?.isFpsLimiterEnabled == true
@@ -604,7 +605,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.drives             = drivesStr
             c.setShowFPS(showFPS)
             c.setFPSCounterConfig(fpsConfig)
-            c.setFullscreenStretched(fullscreenStretched)
+            c.setFullscreenMode(fullscreenMode)
             c.setFrameGenEngine(frameGenEngine)
             c.setFpsLimiterEnabled(fpsLimiterEnabled)
             c.setMatchRefreshRate(matchRefreshRate)
@@ -654,7 +655,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 put("drives", drivesStr)
                 put("showFPS", showFPS)
                 put("fpsCounterConfig", fpsConfig)
-                put("fullscreenStretched", fullscreenStretched)
+                put("fullscreenMode", fullscreenMode)
                 put("exclusiveXInput", exclusiveXInput)
                 put("renderer", StringUtils.parseIdentifier(selectedRenderer))
                 put("rendererNative", rendererNative)

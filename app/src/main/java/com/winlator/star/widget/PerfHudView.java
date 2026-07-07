@@ -102,6 +102,10 @@ public class PerfHudView extends View {
     private Runnable onTapListener = null;
     public void setOnTapListener(Runnable r) { this.onTapListener = r; }
 
+    /** Invoked when a drag ends, with the overlay's final (x, y). Used to persist HUD position. */
+    private java.util.function.BiConsumer<Float, Float> onMovedListener = null;
+    public void setOnMovedListener(java.util.function.BiConsumer<Float, Float> l) { this.onMovedListener = l; }
+
     public PerfHudView(Context context) { this(context, null); }
     public PerfHudView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -426,6 +430,8 @@ public class PerfHudView extends View {
                         && (event.getEventTime() - downTime) <= ViewConfiguration.getLongPressTimeout()
                         && onTapListener != null) {
                     onTapListener.run();
+                } else if (moved && onMovedListener != null) {
+                    onMovedListener.accept(getX(), getY());
                 }
                 return true;
         }

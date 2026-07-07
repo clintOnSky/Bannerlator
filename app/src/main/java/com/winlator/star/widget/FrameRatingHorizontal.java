@@ -67,6 +67,10 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
     /** Invoked on a single tap (not a drag); used to toggle HUD orientation in-game. */
     public void setOnTapListener(Runnable r) { this.onTapListener = r; }
 
+    /** Invoked when a drag ends, with the overlay's final (x, y). Used to persist HUD position. */
+    private java.util.function.BiConsumer<Float, Float> onMovedListener = null;
+    public void setOnMovedListener(java.util.function.BiConsumer<Float, Float> l) { this.onMovedListener = l; }
+
     public FrameRatingHorizontal(Context context) {
         this(context, null);
     }
@@ -234,6 +238,8 @@ public class FrameRatingHorizontal extends FrameLayout implements Runnable {
                         && (event.getEventTime() - downTime) <= ViewConfiguration.getLongPressTimeout()
                         && onTapListener != null) {
                     onTapListener.run();
+                } else if (moved && onMovedListener != null) {
+                    onMovedListener.accept(getX(), getY());
                 }
                 return true;
         }

@@ -120,6 +120,12 @@
             android:exported="false" />
 
         <activity
+            android:name="com.winlator.star.FilePickerActivity"
+            android:theme="@style/AppTheme.Dark"
+            android:screenOrientation="sensor"
+            android:exported="false" />
+
+        <activity
             android:name="com.winlator.star.ShortcutPickerActivity"
             android:theme="@style/AppTheme"
             android:screenOrientation="sensor"
