@@ -51,13 +51,32 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.3** — built from Star **marcescence** (`versionName 2.3`, `versionCode 38`) |
+| **Version** | Bannerlator **V 2.4** — built from Star **marcescence** (`versionName 2.4`, `versionCode 39`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
 ---
 
-## 🆕 What's New in 2.3
+## 🆕 What's New in 2.4
+
+2.4 is the **fit & finish** release. Take control of **how your game fills the screen**, import files **without fighting Android's system picker**, and make your **in-game choices stick per game**. Nearly every headline feature here came straight from a GitHub report or request. It's an **app-side** update — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched.
+
+**🖥️ Fullscreen aspect-ratio modes — new.** No more forced stretching on wide games. Choose exactly how the picture fits the screen, **per container *and* per game**: **Off** (windowed, letterboxed), **Fit** (fullscreen, aspect preserved), **Stretch** (fills, ignores aspect), **Fill** (fills with aspect kept, cropping the overflow — no bars, no distortion) and **Integer** (largest whole-number scale, pixel-perfect and centered). Switch live from the in-game drawer with a new **five-button selector** that applies instantly and keeps the drawer open so you can compare. Works on the OpenGL, Vulkan and SurfaceFlinger renderers. *(GitHub #71.)*
+
+**📁 Import files with the built-in File Manager — new.** Android's system file picker (SAF) silently fails or crawls on a lot of OEM skins. Every local import now opens **Bannerlator's own File Manager** in a pick mode instead — covering **content packs (`.wcp`), control profiles (`.icp`), wallpapers, custom icons, saves, shortcuts, drivers and the big Proton / Wine / DXVK / box64 / FEXCore assets**. It starts in **Download**, **remembers your last folder**, filters to the file types you need, and now shows a **real thumbnail** for image files (jpg/png/webp…) instead of a generic icon — so picking a wallpaper is no longer done blind. Large imports show a **progress bar with percentage and ETA**. The system picker is still available as a **"Pick via system…"** option for cloud / document providers. *(GitHub #73.)*
+
+**🎚️ In-game choices that stick — per game — new.** Three settings you tune in-game are now remembered per game and restored on relaunch: the **Scaling mode** (SGSR / FSR / FSR-Fit / Sharpen / NIS used to reset to a plain filter every launch), the **Fullscreen mode**, and your dragged **FPS overlay position** (classic *and* GameHub HUD).
+
+**🧩 Choose your DLC + smarter Steam installs — new.** A **"Choose DLC"** sheet lets you opt out of owned DLC before downloading, with the download size updating **live** as you check and uncheck; an **"Includes DLC"** line on the detail page; and a **true-size install fix** — Steam's catalog over-reported some games' sizes, so a fully-downloaded game could be wrongly flagged "incomplete" and refuse to launch, which is now resolved by fetching the real depot-manifest sizes. The detail page also gains a **size breakdown** (on-disk footprint, download size, catalog size, free space) and **download ETA + speed** across the detail page, Download Manager and notification. *(Install-blocker reported by @Devaspe.)*
+
+**🖼️ Container wallpaper picker — new.** Pick an image as your container's desktop wallpaper — the picker now actually appears in the container editor — and choose whether a wallpaper applies to **just this container** or **globally** to all of them. *(GitHub #66.)*
+
+**💾 Back up & restore game saves — new.** Export and import your saves as **GameHub-compatible zips**, with per-game save discovery, a confirm checklist before anything is overwritten, and a caution prompt so you verify before replacing originals.
+
+**🔧 Fixes.** The **magnifier follows the cursor on Vulkan** now (parity with OpenGL, fullscreen and windowed) *(GitHub #44)* and **no longer dims the whole screen** while zoomed; the Settings **"Enable File Provider" help button no longer crashes**; and **Scrape cover** is available from the list-view overflow menu, not just the grid.
+
+<details>
+<summary><b>Previously in 2.3</b> — the storefronts release</summary>
 
 2.3 is the **storefronts** release. Bannerlator gains a full **built-in Steam store** — sign in with **username/password or QR code**, browse your owned library, and **download + install** your games through a native depot engine — plus new **Epic Games** and **Amazon Games** stores, with the existing **GOG** store folded into a new **cross-store Download Manager**. One ⬇ manager shows every active download and your whole installed library across **all four stores**, with **background downloads** that survive leaving the app and appear in your **notification shade**. For offline / emulated play there's an optional **Goldberg auto-patch** for Steam games, a **4-tier download-speed** picker, and this release **hardens store logs** so credentials and tokens are scrubbed from anything you might share. It's an **app-side** update — **no ImageFS reinstall** — your containers, themes and settings carry over untouched.
 
@@ -116,6 +135,8 @@
 
 </details>
 
+</details>
+
 ---
 
 ## ✨ Full Features
@@ -143,7 +164,8 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - Multiple host renderers — **Vulkan**, **OpenGL**, and **VirGL**.
 - > ℹ️ The **Vulkan host renderer** uses the rendering path from **[StevenMXZ](https://github.com/StevenMXZ/Winlator-Ludashi)** (Winlator-Ludashi); its `AHardwareBuffer` present path — what makes Vulkan / DXVK / VKD3D content actually display correctly — was ported from / cross-examined against **[GameNative](https://github.com/utkarshdalal/GameNative)**. See [Credits](#-credits).
 - **Native Rendering (Low-Latency Mode)** — low-latency direct-scanout presentation on **both the Vulkan *and* OpenGL renderers**, skipping the compositor blit to cut input lag (mutually exclusive with that renderer's post-processing effects / scaling, since it bypasses the compositor).
-- **Spatial upscalers on *both* the Vulkan *and* OpenGL renderers** — **SGSR** (Snapdragon GSR 1.0) and **FSR / FSR-Fit** (AMD FidelityFX Super Resolution 1.0), plus **NIS** (NVIDIA Image Scaling, Vulkan), a **Sharpen** (RCAS) mode and Linear / Nearest, all switchable live in the in-game drawer. On Vulkan it engages when a game renders below display resolution; on OpenGL it renders the scene at a reduced internal resolution and reconstructs it back up. Every sharpness slider runs 0 (off) → 100 (max).
+- **Spatial upscalers on *both* the Vulkan *and* OpenGL renderers** — **SGSR** (Snapdragon GSR 1.0) and **FSR / FSR-Fit** (AMD FidelityFX Super Resolution 1.0), plus **NIS** (NVIDIA Image Scaling, Vulkan), a **Sharpen** (RCAS) mode and Linear / Nearest, all switchable live in the in-game drawer. On Vulkan it engages when a game renders below display resolution; on OpenGL it renders the scene at a reduced internal resolution and reconstructs it back up. Every sharpness slider runs 0 (off) → 100 (max). Your chosen scaling mode is now **remembered per game** across relaunch.
+- **Fullscreen aspect-ratio modes** — control how a game fills the screen, **per container and per game**: **Off** (windowed, letterboxed), **Fit** (fullscreen, aspect preserved), **Stretch** (fills, ignores aspect), **Fill** (fills with aspect kept, cropping the overflow — no bars, no distortion) and **Integer** (largest whole-number scale, pixel-perfect and centered). A five-button selector in the in-game drawer switches modes live without closing the drawer, on all three host renderers. Your choice is saved per game.
 - **Supersampling (Render scale)** — render above display resolution (1.25× / 1.5× / 2×) and downsample with a Lanczos-2 filter for DSR / OGSSAA-style anti-aliasing; set per container / per shortcut.
 - **Screen effects on both the OpenGL *and* Vulkan renderers** — FXAA, Toon, CRT, NTSC, Color grading, **CAS** sharpening, and fake-HDR (the Vulkan path runs them through a new post-processing pipeline; previously they were OpenGL-only).
 - **Debanding (Vulkan)** — an optional terminal dither pass that removes the visible banding from smooth gradients, skies, and dark scenes on 8-bit output, with an adjustable strength.
@@ -167,12 +189,14 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - **Auto-close on game exit** — the session closes itself once the launched game quits (per-container "Close when game exits" toggle, on by default), so you're not left at a black Wine desktop.
 - **Import / export** containers to move or back up setups.
 - Per-container control of Wine version, graphics driver, DXVK / VKD3D version, Box64 preset, drive mappings, Z-drive selector, and environment variables.
+- **Desktop wallpaper picker** — set an image as a container's Wine desktop wallpaper from the container editor, and choose whether it applies to **just this container** or **globally** to all of them.
 - **Compatibility Layers download menu** — a cloud button on each component (Wine/Proton, DXVK, VKD3D, Box64/WOWBox64, FEXCore) opens a downloader to browse, install or remove versions, with **Wine/Proton tabs**, an **"in use"** marker, **install-from-file**, and **byte-accurate download + install progress bars**.
 
 ### 🕹️ Games, shortcuts & input
 - **Game library** with grid or list layout, sorting, and installed/updated filters.
 - **Redesigned game cards** — primary chips (renderer · DXVK · frame-gen) over a muted driver · VKD3D · backend line, with the resolution in the subtitle; long component names no longer blank the game title.
 - Add shortcuts from external storage.
+- **Back up & restore game saves** as **GameHub-compatible zips**, with per-game save discovery and a confirm checklist before anything is overwritten.
 - **SteamGridDB** cover-art scraping.
 - Per-game settings including display language / locale.
 - **Customizable on-screen touch controls** and virtual gamepad overlays, which **follow your app theme** or take a **per-game custom colour** you set in the Controls editor.
@@ -181,6 +205,7 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 ### 🛒 Built-in stores & cross-store Download Manager
 Sign in to your existing storefronts and play from libraries **you already own** — Bannerlator does not sell, bundle or circumvent any game or DRM.
 - **Steam** — sign in with **username / password or QR code**, browse your owned library, and **download + install** games through a built-in **depot engine** (built on **[JavaSteam](https://github.com/Longi94/JavaSteam)**). Includes a **4-tier download-speed** picker (Slow / Medium / Fast / Blazing), **session hardening** that recovers from Steam's ~1-hour connection-manager logoff so long installs finish, a **connection / login status pill**, and a depot-download **OOM fix**.
+  - **DLC picker** — a **"Choose DLC"** sheet lets you opt out of owned DLC before downloading, with the download size updating live as you check and uncheck, plus an **"Includes DLC"** line and a **size breakdown** (footprint / download / catalog / free space) and **download ETA + speed** on the detail page. A **true-size install fix** fetches real depot-manifest sizes so fully-downloaded games are no longer wrongly flagged "incomplete."
   - **Optional Goldberg auto-patch** on a game's detail page — a **[Goldberg](https://mr_goldberg.gitlab.io/goldberg_emulator/) / gbe_fork** Steam-emulator patch for **offline / emulated** play, in **Regular / Experimental / ColdClient** tiers, installed automatically and cleanly reverted on switch-back. *(Modifies a game's shipped files — **use at your own risk**, for games you own.)*
 - **Epic Games** — sign in, browse your library, and **download / install / launch** your titles (including Epic **free games**).
 - **Amazon Games** — sign in, browse your library, and **download / install / launch** your titles.
@@ -203,8 +228,8 @@ The Steam / Epic / GOG / Amazon sign-ins are a **third-party login system, exact
 - **Theme-aware everywhere** — your selected preset / accent recolours the **whole app *and* the in-game side drawer**, including dialogs, chips, sliders and overlays.
 - **Customizable themes** — **16 presets** (AMOLED default, Classic Dark, Ocean, Forest, Sunset, Rose, Steel, plus Midnight Cobalt, Phosphor, Carbon & Ember, Amethyst, Crimson, Synthwave, Royal Gold, Frost and Monochrome) plus an **HSV custom-accent picker**.
 - In-game overlay drawer for settings, input, and quick toggles, with a Task Manager that lists processes as cards and can launch new tasks on any renderer.
-- **Built-in File Manager with Favorites** — bookmark folders and jump to them from a dedicated list, each labelled by storage source (Internal / SD card / a container's Drive C: or Z:) and full path.
-- **Performance HUD** — FPS, frame time, CPU/GPU temperature, and RAM, in vertical or horizontal layout.
+- **Built-in File Manager with Favorites** — bookmark folders and jump to them from a dedicated list, each labelled by storage source (Internal / SD card / a container's Drive C: or Z:) and full path. Image files show **real thumbnails**, and the File Manager doubles as the app's **file picker for every import** (WCP / ICP / wallpaper / drivers / assets) — reliable on OEM skins where Android's system picker fails, with the system picker still available as a secondary option.
+- **Performance HUD** — FPS, frame time, CPU/GPU temperature, and RAM, in vertical or horizontal layout, with its on-screen **position saved per game**.
 
 ### 📥 Builds & distribution
 - **Three build flavors** with distinct package IDs — *standard*, *PuBG*, and *Ludashi*.
@@ -358,7 +383,7 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **JavaSteam** | [JavaSteam](https://github.com/Longi94/JavaSteam) (`in.dragonbra:javasteam`) by **Longi94** — the Steam **connection-manager client** the built-in Steam store logs in and talks to Steam with, and — via the **`javasteam-depotdownloader`** fork by **joshuatam** — the **entire depot-download engine** Bannerlator's Steam store is built on. |
 | **Goldberg Steam Emu / gbe_fork** | [Goldberg Steam Emu](https://mr_goldberg.gitlab.io/goldberg_emulator/) by **Mr_Goldberg**, and **gbe_fork** by **[Detanup01](https://github.com/Detanup01/gbe_fork)** — the Steam emulator Bannerlator's **Goldberg auto-patch** installs (Regular / Experimental / ColdClient tiers) for offline / emulated play of games you own. |
 | **Pluvia** | [Pluvia](https://github.com/oxters168/Pluvia) — an Android Steam client whose patterns were **referenced alongside GameNative** while building the Steam store's login / session handling. |
-| **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. **In 2.3**, building on JavaSteam / GameNative / Goldberg, the original engineering is Bannerlator's own: the **cross-store Download Manager**, the **four storefront integrations** (Steam / Epic / GOG / Amazon), the multi-week **Steam session-hardening** work, the depot **OOM fix**, the **Goldberg auto-patch** integration, the store **Material-3 restyle**, and the store-log **credential redaction** (`StoreLog.redactUrl`). Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
+| **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. **In 2.3**, building on JavaSteam / GameNative / Goldberg, the original engineering is Bannerlator's own: the **cross-store Download Manager**, the **four storefront integrations** (Steam / Epic / GOG / Amazon), the multi-week **Steam session-hardening** work, the depot **OOM fix**, the **Goldberg auto-patch** integration, the store **Material-3 restyle**, and the store-log **credential redaction** (`StoreLog.redactUrl`). **In 2.4**, the **fullscreen aspect-ratio pipeline** (Off/Fit/Stretch/Fill/Integer across all three renderers), the **in-app File-Manager import picker** replacing SAF (with image thumbnails + percent/ETA import progress), the **DLC picker**, the **true-size depot install fix**, **per-game persistence** of scaling / fullscreen / HUD position, and the **container wallpaper picker**. Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
 
 ### Upstream stack
 
@@ -381,6 +406,17 @@ The Wine/translation stack this app bundles or downloads:
 | **Frame Generation (bionic-fg)** | [xXJSONDeruloXx](https://github.com/xXJSONDeruloXx/bionic-fg) |
 | **Frame Generation (lsfg-vk)** | [PancakeTAS](https://github.com/PancakeTAS/lsfg-vk) · Android port [FrankBarretta](https://github.com/FrankBarretta/lsfg-vk-android) · live-reload fork [GameNative](https://github.com/utkarshdalal/GameNative) · DLL [Lossless Scaling](https://store.steampowered.com/app/993090/Lossless_Scaling/) (user-supplied) |
 | **Post-processing (ReShade / vkBasalt)** | [vkBasalt](https://github.com/DadSchoorse/vkBasalt) by [DadSchoorse](https://github.com/DadSchoorse) (zlib) · Winlator packaging [Pipetto-crypto](https://github.com/Pipetto-crypto/winlator) · effects by [crosire](https://github.com/crosire/reshade-shaders) · [prod80](https://github.com/prod80/prod80-reshade-repository) · [luluco250](https://github.com/luluco250/FXShaders) · fubax (MIT / CC0) |
+
+### Community reports & requests
+
+Much of Bannerlator's polish is driven by the people who file issues and test builds. Recent features came directly from:
+
+- **[@kylinzang](https://github.com/kylinzang)** — fullscreen aspect-ratio modes ([#71](https://github.com/The412Banner/Bannerlator/issues/71)) and the in-app File-Manager import picker ([#73](https://github.com/The412Banner/Bannerlator/issues/73)), plus the ongoing Mali / BCn-layer work.
+- **[@SombraShadow](https://github.com/SombraShadow)** — the container wallpaper picker ([#66](https://github.com/The412Banner/Bannerlator/issues/66)).
+- **[@abdogm](https://github.com/abdogm)** — magnifier cursor-follow & no-dim fixes ([#44](https://github.com/The412Banner/Bannerlator/issues/44)).
+- **[@Devaspe](https://github.com/Devaspe)** — the Steam install-blocker report that drove the true-size depot install fix.
+
+…and everyone in the Discord and on GitHub who tests builds and reports issues. 🙏
 
 Additional credits surfaced in the **Star Bionic REVAMPED** project (`star.bionic-revamp`):
 
