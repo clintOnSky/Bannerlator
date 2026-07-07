@@ -75,8 +75,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import coil.compose.AsyncImage
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -102,6 +105,9 @@ import java.util.Locale
 private val FileTypeIcon: Map<String, ImageVector> = mapOf(
     "folder" to Icons.Filled.Folder,
 )
+
+// Image extensions that get a real thumbnail (via Coil) instead of the generic file icon.
+private val IMAGE_THUMB_EXTS = setOf("jpg", "jpeg", "png", "webp", "bmp", "gif")
 
 // Color-only sweep: the former card-fill / card-stroke / divider / icon-blue / icon-white
 // constants were rerouted onto MaterialTheme.colorScheme tokens (surface / outline / primary /
@@ -900,6 +906,9 @@ private fun FileItemRow(
     val isDir = file.isDirectory
     val canRun = isDir || file.name.lowercase().let { it.endsWith(".exe") || it.endsWith(".bat") || it.endsWith(".msi") || it.endsWith(".sh") }
     val isExe = !isDir && file.name.lowercase().let { it.endsWith(".exe") || it.endsWith(".bat") || it.endsWith(".msi") || it.endsWith(".sh") }
+    // Image files show a real thumbnail instead of the generic file icon (handy when picking a
+    // wallpaper/icon). Coil sizes the decode to the 36dp slot and caches it, so scrolling stays smooth.
+    val isImage = !isDir && file.extension.lowercase() in IMAGE_THUMB_EXTS
 
     // For real PE executables, try to pull out the embedded application icon (async, off the main thread).
     var exeIcon by remember(file.absolutePath) { mutableStateOf<ImageBitmap?>(null) }
@@ -941,6 +950,17 @@ private fun FileItemRow(
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(36.dp),
+                )
+                // Real image preview. Falls back to the generic file icon while loading or on decode failure.
+                isImage -> AsyncImage(
+                    model = file,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    placeholder = rememberVectorPainter(Icons.Filled.InsertDriveFile),
+                    error = rememberVectorPainter(Icons.Filled.InsertDriveFile),
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(6.dp)),
                 )
                 else -> Icon(
                     imageVector = Icons.Filled.InsertDriveFile,
