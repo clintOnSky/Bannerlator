@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,11 +22,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import android.widget.Toast
 import com.winlator.star.ui.XServerDialogState
 
 @Composable
@@ -34,6 +38,8 @@ fun DebugDialogContent(state: XServerDialogState) {
     val logLines  by state.logLines.collectAsState()
     val logPaused by state.logPaused.collectAsState()
     val listState = rememberLazyListState()
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
 
     LaunchedEffect(logLines.size) {
         if (logLines.isNotEmpty() && !logPaused) {
@@ -48,6 +54,7 @@ fun DebugDialogContent(state: XServerDialogState) {
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.9f)
                 .padding(8.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
@@ -67,7 +74,7 @@ fun DebugDialogContent(state: XServerDialogState) {
                     state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 200.dp, max = 400.dp)
+                        .weight(1f)
                 ) {
                     items(logLines) { line ->
                         Text(
@@ -97,6 +104,13 @@ fun DebugDialogContent(state: XServerDialogState) {
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    TextButton(onClick = {
+                        // Copy the full accumulated log (incl. BCn transfer stats) to the clipboard.
+                        clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
+                        Toast.makeText(context, "Log copied", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Text("Copy")
+                    }
                     TextButton(onClick = { state.clearLog() }) {
                         Text("Clear")
                     }

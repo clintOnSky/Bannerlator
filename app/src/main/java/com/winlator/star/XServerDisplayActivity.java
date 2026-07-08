@@ -1921,10 +1921,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         envVars.put("WINEDEBUG", wineDebugValue);
 
         // ── Wine debug file log ────────────────────────────────────────────────
-        // Writes all Wine stdout/stderr to a readable file.
-        // Path: /sdcard/Android/data/com.winlator.star/files/wine_debug.log
+        // Writes all Wine stdout/stderr to a readable file, in the user-chosen log folder
+        // (Settings › Logs › Log location, issue #70). Defaults to
+        // /sdcard/Android/data/com.winlator.star/files/wine_debug.log; falls back there if the
+        // chosen dir is missing/unwritable.
         try {
-            File logDir = getExternalFilesDir(null);
+            File logDir = com.winlator.star.core.LogLocation.resolveLogDir(this);
             if (logDir != null) {
                 logDir.mkdirs();
                 File logFile = new File(logDir, "wine_debug.log");
@@ -3060,6 +3062,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-gamenative.tzst");
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-gamenative.tzst", rootDir);
     }
+    else if (graphicsDriver.startsWith("wrapper-bcn_layer")) {
+        // Wrapper + bcn_layer == the wrapper-leegao ICD as its base, PLUS leegao's bcn_layer
+        // implicit Vulkan layer (its .so + manifest ship in extra_libs.tzst and are picked up
+        // via the already-set VK_LAYER_PATH). Extract the SAME base wrapper as Wrapper-leegao;
+        // the BCn env block below activates the layer.
+        Log.d("GraphicsDriverExtraction", "Extracting: graphics_driver/wrapper-leegao.tzst (base for wrapper-bcn_layer)");
+        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/wrapper-leegao.tzst", rootDir);
+    }
 
     // Original logic for DXWrapper and environment variables
     if (dxwrapper.contains("dxvk")) {
@@ -3186,32 +3196,89 @@ public class XServerDisplayActivity extends AppCompatActivity {
     String disablePresentWait = graphicsDriverConfig.get("disablePresentWait");
     if (disablePresentWait != null) envVars.put("WRAPPER_DISABLE_PRESENT_WAIT", disablePresentWait);
 
-    String bcnEmulation = graphicsDriverConfig.get("bcnEmulation");
-    String bcnEmulationType = graphicsDriverConfig.get("bcnEmulationType");
+    // Wrapper + bcn_layer: leegao's bcn_layer implicit Vulkan layer OWNS the shared
+    // ENABLE_BCN_COMPUTE / BCN_COMPUTE_AUTO vars when this driver is selected. Its env block
+    // (below) takes precedence and the legacy wrapper bcnEmulation heuristic is SUPPRESSED so
+    // the two paths can't emit contradictory values. The layer is gated by a hardcoded vendor
+    // check (below): activated on non-Qualcomm GPUs (Mali/Xclipse/PowerVR) which lack native BCn,
+    // and skipped on Adreno/Qualcomm which has native BCn.
+    boolean isBcnLayerDriver = graphicsDriver != null && graphicsDriver.startsWith("wrapper-bcn_layer");
 
-    if (bcnEmulation != null) {
-        switch (bcnEmulation) {
-            case "auto" -> {
-                if ("compute".equals(bcnEmulationType) && GPUInformation.getVendorID(null, null) != 0x5143) {
-                    envVars.put("ENABLE_BCN_COMPUTE", "1");
-                    envVars.put("BCN_COMPUTE_AUTO", "1");
+    if (!isBcnLayerDriver) {
+        String bcnEmulation = graphicsDriverConfig.get("bcnEmulation");
+        String bcnEmulationType = graphicsDriverConfig.get("bcnEmulationType");
+
+        if (bcnEmulation != null) {
+            switch (bcnEmulation) {
+                case "auto" -> {
+                    if ("compute".equals(bcnEmulationType) && GPUInformation.getVendorID(null, null) != 0x5143) {
+                        envVars.put("ENABLE_BCN_COMPUTE", "1");
+                        envVars.put("BCN_COMPUTE_AUTO", "1");
+                    }
+                    envVars.put("WRAPPER_EMULATE_BCN", "3");
                 }
-                envVars.put("WRAPPER_EMULATE_BCN", "3");
-            }
-            case "full" -> {
-                if ("compute".equals(bcnEmulationType) && GPUInformation.getVendorID(null, null) != 0x5143) {
-                    envVars.put("ENABLE_BCN_COMPUTE", "1");
-                    envVars.put("BCN_COMPUTE_AUTO", "0");
+                case "full" -> {
+                    if ("compute".equals(bcnEmulationType) && GPUInformation.getVendorID(null, null) != 0x5143) {
+                        envVars.put("ENABLE_BCN_COMPUTE", "1");
+                        envVars.put("BCN_COMPUTE_AUTO", "0");
+                    }
+                    envVars.put("WRAPPER_EMULATE_BCN", "2");
                 }
-                envVars.put("WRAPPER_EMULATE_BCN", "2");
+                case "none" -> envVars.put("WRAPPER_EMULATE_BCN", "0");
+                default -> envVars.put("WRAPPER_EMULATE_BCN", "1");
             }
-            case "none" -> envVars.put("WRAPPER_EMULATE_BCN", "0");
-            default -> envVars.put("WRAPPER_EMULATE_BCN", "1");
         }
-    }
 
-    String bcnEmulationCache = graphicsDriverConfig.get("bcnEmulationCache");
-    if (bcnEmulationCache != null) envVars.put("WRAPPER_USE_BCN_CACHE", bcnEmulationCache);
+        String bcnEmulationCache = graphicsDriverConfig.get("bcnEmulationCache");
+        if (bcnEmulationCache != null) envVars.put("WRAPPER_USE_BCN_CACHE", bcnEmulationCache);
+
+        // WRAPPER_BCN_ASTC — integrated-wrapper ASTC transcode target (Wrapper-gamenative build
+        // honors this; older/non-BCn wrappers ignore it). Only emit when the user opts in.
+        String bcnEmulationAstc = graphicsDriverConfig.get("bcnEmulationAstc");
+        if ("1".equals(bcnEmulationAstc)) envVars.put("WRAPPER_BCN_ASTC", "1");
+    }
+    else {
+        // === bcn_layer activation ===
+        // Vendor gate (hardcoded, no user toggle): non-Qualcomm GPUs (Mali/Xclipse/PowerVR/...)
+        // are the target case, so the layer is activated on them. Adreno/Qualcomm (0x5143) has
+        // NATIVE BCn — transcode would be wasted overhead — so it is skipped there, exactly like
+        // the legacy wrapper BCn block's own != 0x5143 guard.
+        boolean activateBcnLayer = GPUInformation.getVendorID(null, null) != 0x5143;
+
+        if (activateBcnLayer) {
+        // ENABLE_BCN_COMPUTE is both the master switch and the loader enable-gate — always 1.
+        envVars.put("ENABLE_BCN_COMPUTE", "1");
+
+        // "Force decode on all GPUs" ON  -> BCN_COMPUTE_AUTO=0 (force, the Mali fix, default)
+        //                            OFF -> BCN_COMPUTE_AUTO=1 (layer auto-detects)
+        String bcnLayerAuto = graphicsDriverConfig.get("bcnLayerAuto");
+        // config stores the toggle state: "1" == force-decode enabled. Default = force decode.
+        boolean forceDecode = (bcnLayerAuto == null) || bcnLayerAuto.equals("1");
+        envVars.put("BCN_COMPUTE_AUTO", forceDecode ? "0" : "1");
+
+        // Two independent transcode targets (checkboxes 1:1 with env vars).
+        String etc2 = graphicsDriverConfig.get("bcnTranscodeEtc2");
+        envVars.put("BCN_TRANSCODE_TO_ETC2", "1".equals(etc2) ? "1" : "0");
+        String astc = graphicsDriverConfig.get("bcnTranscodeAstc");
+        envVars.put("BCN_TRANSCODE_TO_ASTC", "1".equals(astc) ? "1" : "0");
+
+        // Storage image (1, default) vs staging buffer (0).
+        String imageView = graphicsDriverConfig.get("bcnImageView");
+        envVars.put("BCN_COMPUTE_IMAGE_VIEW", "0".equals(imageView) ? "0" : "1");
+
+        // Optional debug log. The shader-v3 layer's logger writes to STDERR (not a file), which
+        // Winlator captures via the Wine debug log (Settings > Logs > Enable Wine Debug). The old
+        // BCN_LF/BCN_LL (file logging) and BCN_MAX_TEXTURE_SIZE were removed upstream in shader-v3.
+        // shader-v3 only actually emits its transfer log when BOTH the log level AND the transfer
+        // profiler are enabled (@kylinzang, #70). BCN_LAYER_LOG_LEVEL alone is silent — the profiler
+        // is what drives the per-transfer log lines — so set the pair together.
+        String debugLog = graphicsDriverConfig.get("bcnDebugLog");
+        if ("1".equals(debugLog)) {
+            envVars.put("BCN_LAYER_LOG_LEVEL", "info,error");
+            envVars.put("BCN_PROFILE_TRANSFERS", "1");
+        }
+        } // activateBcnLayer
+    }
 
     String fdDevFeatures = graphicsDriverConfig.get("fdDevFeatures");
     if (fdDevFeatures != null && fdDevFeatures.equals("1"))

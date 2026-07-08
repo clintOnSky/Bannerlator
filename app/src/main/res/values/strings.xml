@@ -666,6 +666,18 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="graphics_driver_bcn_emulation">BCn Emulation</string>
     <string name="graphics_driver_bcn_emulation_type">BCn Emulation Type</string>
     <string name="graphics_driver_bcn_emulation_cache">BCn Emulation Cache</string>
+    <string name="graphics_driver_bcn_emulation_astc">BCn → ASTC transcode</string>
+    <string name="bcn_layer_section">BCn Layer Settings</string>
+    <string name="bcn_layer_section_hint">Transcodes BC-compressed textures on GPUs without native BCn (Mali / Xclipse / PowerVR). The layer ships as an implicit Vulkan layer; these controls drive its environment.</string>
+    <string name="bcn_layer_force_decode">Force decode on all GPUs</string>
+    <string name="bcn_layer_force_decode_hint">On: always transcode (BCN_COMPUTE_AUTO=0 — the Mali fix). Off: let the layer auto-detect (AUTO=1).</string>
+    <string name="bcn_layer_transcode_etc2">Transcode to ETC2</string>
+    <string name="bcn_layer_transcode_astc">Transcode to ASTC</string>
+    <string name="bcn_layer_transcode_hint">ETC2 and ASTC are effectively mutually exclusive; enabling both is not meaningful. Leave both off to decode to RGBA8.</string>
+    <string name="bcn_layer_image_view">Storage image path</string>
+    <string name="bcn_layer_image_view_hint">On: storage image (default). Off: staging buffer.</string>
+    <string name="bcn_layer_debug_log">BCn debug log</string>
+    <string name="bcn_layer_debug_log_hint">Logs the BCn layer to the Wine debug log (enable Settings &#8250; Logs &#8250; Wine Debug to capture it).</string>
     <string name="opengl_version">OpenGL Version</string>
     <string name="disableVertexArrayBGRA">Disable "Vertex array BGRA"</string>
     <string name="disableKHRdebug">Disable "KHR debug"</string>

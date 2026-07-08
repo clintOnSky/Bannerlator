@@ -1,5 +1,70 @@
 # Star-Compose — Progress Log
 
+## 2026-07-08 — 🧹 CHECKPOINT: post-2.5 branch cleanup (mali branches deleted, cloud-saves preserved)
+
+> **2.5 is out and stable (see entry below). This checkpoint = branch housekeeping. main unchanged at `981cb657`; 2.5 release intact (tag `2.5`, Latest).**
+>
+> **Deleted (local + remote) — all content shipped in 2.5:** `release/2.5-mali` (the clean merge source), `feat/mali-bcn-v4` (mali-v4/v5/v6 pre-release branch), `feat/mali-bcn-layer`, `feat/wrapper-gamenative-bcn`, plus stale local `worktree-agent-*` leftovers.
+>
+> **Full merged-branch sweep (2nd pass):** deleted **42 fully-merged branches total** (2.4/2.5-era features: download-manager + all 4 storefront producers, dlc-picker/ownership, fullscreen, inapp-file-picker, filemanager-thumbnails, all reshade-* that shipped, ui-rebuild, theme-centralize-drawer, drawer-rebuild-p1, goldberg-patcher, steam-qr, store-log-redaction, magnifier/wallpaper/rail-scroll fixes, …). Each verified **0 unique commits vs main on BOTH local AND origin** (patch-id `git cherry`, not naive ancestry) before deletion. SHAs recorded for reversibility → `~/scratchpad/deleted_branches_20260708.txt`. Also removed 6 stale git **worktrees** (`wt-*`, `.claude/worktrees/agent-*`) that were pinning some merged branches — repo now has a single worktree (`main`).
+>
+> **KEPT (13 branches — unmerged/in-progress or explicit):** `main`; `feat/steam-cloud-saves` (re-anchored, above); `feat/save-backup-restore` (actionable ITER-2); and 10 with unique unmerged work — `feat/sgsr2-gate0-depth-receiver-stub`, `feat/bionic-fg-shader-pool`, `feat/depot-size-resolver` (origin ahead by 1), `feat/gl-scanout-overlay-fix`, `exp/gl-scanout-composer-overlay-ahb`, `exp/gl-scanout-prerotate-panelres`, `feat/reshade-mes-patch`, `spike/vkbasalt-reshade`, `test-lsfg-so-ludashi-swap`, `docs/reshade-step3-plan`. (`test` remains on remote — separate/unrelated history.)
+>
+> **Preserved first:** the shelved **Steam cloud-saves** foundation commit (`6fcf27e7`) turned out to live **only** on `feat/mali-bcn-v4` (the `feat/steam-cloud-saves` branch had drifted to a docs commit). Cherry-picked it cleanly onto main → **`feat/steam-cloud-saves` now = main + the cloud-saves foundation** (`6d86f277`), ready to resume in a future version.
+>
+> **Note:** the `mali-v5` / `mali-v6` pre-release **git tags are mislabeled** (they point at main commits, not the build branch — `release.yml`'s tag defaults to the default-branch HEAD). The pre-release **APKs are correct**; only the tags are cosmetic. For future pre-releases off a non-main branch, set `target_commitish`.
+>
+> **Kept:** `main`, `feat/steam-cloud-saves` (re-anchored), `feat/save-backup-restore`. Other merged 2.4-era feature branches remain and could be swept separately.
+
+## 2026-07-08 — 🎉 RELEASE: Bannerlator 2.5 (stable, LATEST) — the Mali hardening release
+
+> **2.5 SHIPPED STABLE — `versionName 2.5`, `versionCode 40`, tag `2.5` (make_latest=true → offered to 2.4 users via the in-app updater). Release run `28911581500` GREEN, 3 flavors + update.json. main tip `34a43924`.**
+>
+> **2.5 = the Mali support hardening release.** Makes BC-texture (BCn) games work on **Mali / Xclipse** GPUs, with a full sign-off on real Mali-G57 (Helio G99) hardware, plus an in-game logging overhaul. Entirely app-side — no ImageFS reinstall; existing containers pull the new driver assets automatically.
+>
+> **Shipped (all from #70, now closed):**
+> - **`Wrapper + bcn_layer`** graphics driver — primary Mali BCn path (leegao **bcn_layer shader-v3**); transcodes BC textures on the GPU. Device-proven: *MiSide* went from crashing → ~34 fps, 0 buffer errors on Mali-G57.
+> - **`Wrapper-gamenative`** — experimental (Adreno-only) secondary driver.
+> - Wrapper bumped to **bionic-vulkan-wrapper ETC2-Milestone-2** (kills `wrapper_DestroyBuffer` spam).
+> - **BCn Layer Settings** dialog (force-decode, ETC2/ASTC transcode, image-view mode, debug logging).
+> - **In-game logging overhaul**: Copy-logs button (pinned on-screen; the mali-v6 layout fix), selectable log location (Settings › Logs), co-located DXVK/DXGI/VKD3D logs, scrollable Wine debug-channels dialog.
+> - release.yml notes hardened against backticks. bcn_layer `.so` kept **unstripped by design** (ongoing Mali debug).
+>
+> **Merge hygiene:** merged via `release/2.5-mali` (clean branch) after excising a stray shelved Steam-cloud-saves commit (`6fcf27e7`) that had drifted onto the mali branch from an earlier shared-worktree session — caught by scanning the merge file list before pushing.
+>
+> **Credits:** **leegao** (bcn_layer shader-v3 + bionic-vulkan-wrapper ETC2-Milestone-2). Testers: **@kylinzang** (Mali-G57, #70 — drove the whole effort + full sign-off), **@rizky2-crypto** (Mali-G610, #30). Experimental gamenative driver base: **GameNative** (utkarshdalal).
+>
+> **Follow-ups:** "Import .so" self-update button → 2.6 (needs its own issue). rizky2 (#30, G610) still open. Shelved Steam cloud-saves parked off main. Release notes also footnote the new [Proton 11.0-1 bionic build](https://github.com/The412Banner/proton-wine/releases/tag/build-p11-20260707).
+
+## 2026-07-06 — 🔧 CHECKPOINT: dev-environment tooling + bridge knowledge corrected (no repo code change)
+
+> **Session tooling/infra work (lives in `~/.local/bin` + memory, not the app repo). Main unchanged at `34cf6249`. Mali v3 build re-staged & awaiting Mali testers.**
+>
+> **Root-bridge knowledge CORRECTED (was hobbling us):** live-tested the logcat-bridge daemon (`~/logcat-bridge/module/system/bin/logcat-bridge-handler`) — its `exec|sh` verb runs `/system/bin/sh -c "$cmd"` and PRESERVES the command, so **pipes / grep / redirects / `$?` DO work ON-DEVICE**. The long-standing "never pipe / bare-verbs-only" rule was WRONG (a local-shell-quoting artifact, not a daemon limit). Real rule: pass the whole remote command as ONE quoted string. The daemon already exposes full root + safe verbs (`tail`/`pkg` logcat, `tomb`, `ps`, `props`, `proc`, `cat`/`ls`/`sql`, binary `write` preserving uid:gid:mode) — **no module change needed**. (Shizuku/no-root backend = separate future idea for the non-root community; the module needs on-device dev for that.)
+>
+> **3 persistent CLI helpers added to `~/.local/bin` (on PATH, survive every session):**
+> - **`bridge '<cmd>'`** — run a root command on the device; auto-syncs the token (kills boot-drift "auth failed"), pipes run on-device. Bare verbs (`bridge ping|tomb|ps|pkg <pkg> -d|cat …`) pass through.
+> - **`ci-watch <branch>`** — dispatch "CI Build (artifacts only)" → auto-capture run id → watch → GREEN/RED + failing-log tail. **Refuses to build main/master implicitly** (footgun guard — a bare test-run accidentally dispatched+was cancelled `28838588161`, hence the guard).
+> - **`stage-apk <run-id|branch> <label> [flavor]`** — download the test APK → stage `/sdcard/Download/bannerlator-<label>-<sha7>-<flavor>.apk` → **host+device sha256 match** via `bridge`. Live-proven: `stage-apk 28837058621 mali-v3` → match ✓.
+> - Chain: `ci-watch <branch> && stage-apk <branch> <label>`. Env overrides BANNER_REPO/WF/DIR/STAGE_DIR. All recorded in [[reference_logcat_bridge_root_access]] + MEMORY always-hot.
+>
+> **Mali v3 status (unchanged, awaiting testers):** branch `feat/mali-bcn-layer` `e3f4f90b`, CI `28837058621` GREEN, staged `bannerlator-mali-v3-e3f4f90-standard.apk` (600,577,679 B, sha `184b71ad…`). @kylinzang (G57/MiSide) + @rizky2-crypto (G610/CODMW, #30) invited on #70.
+
+## 2026-07-06 — 🟢 CHECKPOINT: Mali BCn layer DEVICE-PROVEN + shader-v3 swap done (branch `feat/mali-bcn-layer` `e3f4f90b`, CI green, in testing)
+
+> **NOT on main — on branch `feat/mali-bcn-layer` (rebased onto 2.4 main `15c7186c` → shader-v3 swap `e3f4f90b`), CI `28837058621` GREEN. Test build handed to Mali testers on #70. Merges as 2.5-preN once confirmed.**
+>
+> **✅ Mali device-proof (issue #70):** @kylinzang tested our earlier "Wrapper + bcn_layer" build on **Helio G99 / Mali-G57 MC2** — **MiSide** (BCn Unity game, previously crashed / black-purple textures) now **runs + renders correctly**. First real Mali proof (we can't test on the user's Adreno). Perf heavy (16-24fps, GPU 98-100%) but playable. He flagged 3 bugs: (1) BCn debug-log toggle DEAD (shipped `.so` had no logger), (2) `wrapper_DestroyBuffer: null buffer` batches per scene-load (non-fatal), (3) `BCN_MAX_TEXTURE_SIZE` unverifiable. And requested leegao's **shader-v3** (~3.5× faster ASTC).
+>
+> **✅ shader-v3 swap (this session):** rebased branch onto 2.4 main (1 trivial import conflict), then:
+> - Swapped `app/src/main/assets/graphics_driver/extra_libs.tzst` → `usr/lib/libbcn_layer.so` to leegao's **shader-v3** Release asset (arm64-v8a, NDK r29, kept **UNSTRIPPED** per user's debug-symbols call → tzst 18.8→29.8MB, **STRIP before merge**). Layer manifest identical, unchanged.
+> - **Env-var reconcile:** kept `ENABLE_BCN_COMPUTE`/`BCN_COMPUTE_AUTO`/`BCN_TRANSCODE_TO_ETC2`/`BCN_TRANSCODE_TO_ASTC`/`BCN_COMPUTE_IMAGE_VIEW`; **dropped** `BCN_LF`/`BCN_LL` (v3 logs to **stderr**→Wine debug log) → replaced with `BCN_LAYER_LOG_LEVEL=info,error` (debug-log toggle now works); **dropped** `BCN_MAX_TEXTURE_SIZE` (removed upstream) → removed its dropdown + array + string. v3 ASTC needs `VK_KHR_8bit_storage`+`shaderInt8` (Valhall Mali have it; self-disables gracefully otherwise).
+> - **✅ ADRENO-SAFE (confirmed, triple-gated):** bcn_layer block only runs on the "Wrapper + bcn_layer" driver + hardcoded `getVendorID() != 0x5143` (Qualcomm) gate + Vulkan-loader `enable_environment` → `ENABLE_BCN_COMPUTE` NEVER set on Adreno. Only cost to others = ~11MB APK from the unstripped `.so`.
+>
+> **Issues consolidated:** #70 = single Mali/BCn tracking issue (retitled; roadmap checklist). #54 closed into it; #53/#63/#64 already closed. #30 (@rizky2-crypto, Dimensity 8200 / **Mali-G610** / CODMW loading-screen crash) invited as 2nd Mali tester — kept OPEN until BCn confirmed to fix it. Both testers have the direct Actions build link (run `28837058621`).
+>
+> **CREDITS:** leegao already in README (line 382); **explicitly credit shader-v3 in the 2.5 release notes** (BCn ships in 2.5, not 2.4) — user asked. **NEXT:** await Mali test results (kylinzang before/after fps + working debug log; rizky2-crypto CODMW) → strip `.so` → merge 2.5-preN.
+
 ## 2026-07-06 — 🚀 RELEASE CHECKPOINT: BANNERLATOR 2.4 SHIPPED (stable, latest) — main `c4010ce0`, vc39
 
 > **2.4 is LIVE and marked latest:** https://github.com/The412Banner/Bannerlator/releases/tag/2.4 — built by `release.yml` run `28834510336` (3 flavors standard/pubg/ludashi ~589 MB + `update.json` vc39 so the in-app updater offers it to everyone). versionCode 38→39, versionName 2.3→2.4. Release body = polished markdown (logo banner + shields.io badge chips + feature blocks + issue links + credits); README thoroughly updated (What's New in 2.4, 2.3 nested to history, Full Features refreshed, new "Community reports & requests" credits block). **NEXT stable = 2.5; anything built from here = 2.5-preN, vc40+ until told to cut.**

@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -196,6 +197,9 @@ fun FileManagerScreen(
     // features are gated off and tapping a matching file returns it via [onPick]. Defaults keep the
     // full-featured File Manager nav destination unchanged.
     pickMode: Boolean = false,
+    // Directory-pick mode (issue #70): only folders are listed, files are hidden, and a
+    // "Select this folder" action returns the current directory via [onPick]. Implies pickMode.
+    pickDirMode: Boolean = false,
     pickExtensions: List<String> = emptyList(),
     initialDir: File? = null,
     pickerTitle: String? = null,
@@ -260,7 +264,8 @@ fun FileManagerScreen(
         scope.launch {
             val list = withContext(Dispatchers.IO) {
                 dir.listFiles()?.toList()
-                    ?.filter { !pickMode || it.isDirectory || matchesPickExt(it) }
+                    // Dir-pick mode: folders only. File-pick: folders + matching files. Else: all.
+                    ?.filter { if (pickDirMode) it.isDirectory else !pickMode || it.isDirectory || matchesPickExt(it) }
                     ?.sortedWith(
                         compareBy<File> { if (it.isDirectory) 0 else 1 }.thenBy { it.name.lowercase() }
                     ) ?: emptyList()
@@ -609,6 +614,19 @@ fun FileManagerScreen(
                     .background(MaterialTheme.colorScheme.surfaceContainer)
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             )
+        }
+        // ── Dir-pick action bar: confirm the currently-browsed folder ──
+        if (pickDirMode) {
+            Button(
+                onClick = { onPick?.invoke(currentDir) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Icon(Icons.Filled.Folder, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Select this folder")
+            }
         }
         // ── Path bar ──
         Row(

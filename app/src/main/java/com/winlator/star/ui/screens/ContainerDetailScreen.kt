@@ -12,6 +12,7 @@ import android.view.View
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1520,9 +1521,28 @@ internal fun GraphicsDriverConfigDialog(
     var bcnEmulation     by remember { mutableStateOf(cfg["bcnEmulation"] ?: "auto") }
     var bcnEmulationType by remember { mutableStateOf(cfg["bcnEmulationType"] ?: "software") }
     var bcnEmulationCache by remember { mutableStateOf(cfg["bcnEmulationCache"] ?: "0") }
+    // WRAPPER_BCN_ASTC — integrated-wrapper (Wrapper-gamenative/leegao) ASTC transcode path.
+    // Off by default; only honored by the BCn-integrated wrapper ICD, ignored by others.
+    var bcnEmulationAstc by remember { mutableStateOf(cfg["bcnEmulationAstc"] == "1") }
     var syncFrame        by remember { mutableStateOf(cfg["syncFrame"] == "1") }
     var disablePresentWait by remember { mutableStateOf(cfg["disablePresentWait"] == "1") }
     var fdDevFeatures    by remember { mutableStateOf(cfg["fdDevFeatures"] == "1") }
+
+    // --- BCn Layer (leegao bcn_layer) settings; only meaningful when driver == wrapper-bcn_layer ---
+    val isBcnLayer = graphicsDriver == "wrapper-bcn_layer"
+    // The integrated-BCn wrapper (Wrapper-gamenative) is the only wrapper ICD that actually honors
+    // WRAPPER_BCN_ASTC (see XServerDisplayActivity BCn env block). The older wrappers
+    // (original/leegao/legacy) ignore it, and Wrapper + bcn_layer has its own ASTC control
+    // (bcnTranscodeAstc), so the general "BCn -> ASTC transcode" toggle belongs to gamenative only.
+    val isGamenative = graphicsDriver == "wrapper-gamenative"
+    var bcnSectionExpanded by remember { mutableStateOf(false) }
+    // Force decode on all GPUs -> BCN_COMPUTE_AUTO=0. Default ON (the Mali force-decode fix).
+    var bcnLayerAuto      by remember { mutableStateOf(cfg["bcnLayerAuto"]?.let { it == "1" } ?: true) }
+    var bcnTranscodeEtc2  by remember { mutableStateOf(cfg["bcnTranscodeEtc2"] == "1") }
+    var bcnTranscodeAstc  by remember { mutableStateOf(cfg["bcnTranscodeAstc"] == "1") }
+    // Storage image path -> BCN_COMPUTE_IMAGE_VIEW=1. Default ON.
+    var bcnImageView      by remember { mutableStateOf(cfg["bcnImageView"]?.let { it == "1" } ?: true) }
+    var bcnDebugLog       by remember { mutableStateOf(cfg["bcnDebugLog"] == "1") }
 
     val deviceMemoryEntries = remember { context.resources.getStringArray(R.array.device_memory_entries).toList() }
     var selectedMemoryEntry by remember {
@@ -1640,6 +1660,16 @@ internal fun GraphicsDriverConfigDialog(
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_cache), bcnCacheEntries, bcnEmulationCache, { bcnEmulationCache = it })
                 Spacer(Modifier.height(8.dp))
+                // ASTC transcode is offered by the BCn-integrated wrapper (Wrapper-gamenative).
+                // The Wrapper + bcn_layer driver has its own ASTC control in its section below;
+                // the older wrappers ignore WRAPPER_BCN_ASTC entirely, so only expose it here for
+                // the gamenative integrated-BCn wrapper.
+                if (isGamenative) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = bcnEmulationAstc, onCheckedChange = { bcnEmulationAstc = it })
+                        Text(stringResource(R.string.graphics_driver_bcn_emulation_astc))
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = syncFrame, onCheckedChange = { syncFrame = it })
                     Text(stringResource(R.string.graphics_driver_sync_frame))
@@ -1651,6 +1681,75 @@ internal fun GraphicsDriverConfigDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = fdDevFeatures, onCheckedChange = { fdDevFeatures = it })
                     Text("OneUI / HyperOS Fix")
+                }
+
+                // BCn Layer Settings — only when the Wrapper + bcn_layer driver is selected.
+                if (isBcnLayer) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { bcnSectionExpanded = !bcnSectionExpanded }
+                    ) {
+                        Text(
+                            (if (bcnSectionExpanded) "▾  " else "▸  ") + stringResource(R.string.bcn_layer_section),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (bcnSectionExpanded) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.bcn_layer_section_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnLayerAuto, onCheckedChange = { bcnLayerAuto = it })
+                            Text(stringResource(R.string.bcn_layer_force_decode))
+                        }
+                        Text(
+                            stringResource(R.string.bcn_layer_force_decode_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnTranscodeEtc2, onCheckedChange = { bcnTranscodeEtc2 = it })
+                            Text(stringResource(R.string.bcn_layer_transcode_etc2))
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnTranscodeAstc, onCheckedChange = { bcnTranscodeAstc = it })
+                            Text(stringResource(R.string.bcn_layer_transcode_astc))
+                        }
+                        Text(
+                            stringResource(R.string.bcn_layer_transcode_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnImageView, onCheckedChange = { bcnImageView = it })
+                            Text(stringResource(R.string.bcn_layer_image_view))
+                        }
+                        Text(
+                            stringResource(R.string.bcn_layer_image_view_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bcnDebugLog, onCheckedChange = { bcnDebugLog = it })
+                            Text(stringResource(R.string.bcn_layer_debug_log))
+                        }
+                        Text(
+                            stringResource(R.string.bcn_layer_debug_log_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         },
@@ -1667,6 +1766,12 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnEmulation=$bcnEmulation;" +
                     "bcnEmulationType=$bcnEmulationType;" +
                     "bcnEmulationCache=$bcnEmulationCache;" +
+                    "bcnEmulationAstc=${if (bcnEmulationAstc) "1" else "0"};" +
+                    "bcnLayerAuto=${if (bcnLayerAuto) "1" else "0"};" +
+                    "bcnTranscodeEtc2=${if (bcnTranscodeEtc2) "1" else "0"};" +
+                    "bcnTranscodeAstc=${if (bcnTranscodeAstc) "1" else "0"};" +
+                    "bcnImageView=${if (bcnImageView) "1" else "0"};" +
+                    "bcnDebugLog=${if (bcnDebugLog) "1" else "0"};" +
                     "gpuName=$gpuName" +
                     ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"
                 onConfirm(config)

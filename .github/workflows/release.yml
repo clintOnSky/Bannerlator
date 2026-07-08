@@ -220,11 +220,16 @@ jobs:
       # Drives the in-app updater (UpdateManager). The app fetches this from
       # releases/latest/download/update.json; because make_latest=true +
       # prerelease=false below, only stable cuts ever change it.
+      # release_notes/title arrive via env (NOT inline ${{ }}) so backticks / $ /
+      # newlines in the notes can't trigger shell command-substitution (exit 127).
+      env:
+        RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
+        RELEASE_TITLE: ${{ github.event.inputs.release_title }}
       run: |
         VERSION_CODE=$(grep versionCode app/build.gradle | head -1 | grep -oE '[0-9]+' | head -1)
         N="${{ github.event.inputs.release_number }}"
-        NOTES="${{ github.event.inputs.release_notes }}"
-        [ -z "$NOTES" ] && NOTES="${{ github.event.inputs.release_title }}"
+        NOTES="$RELEASE_NOTES"
+        [ -z "$NOTES" ] && NOTES="$RELEASE_TITLE"
         jq -n \
           --argjson vc "$VERSION_CODE" \
           --arg vn "$VERSION" \

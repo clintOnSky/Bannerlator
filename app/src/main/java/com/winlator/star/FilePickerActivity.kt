@@ -37,12 +37,14 @@ class FilePickerActivity : ComponentActivity() {
         val extensions = intent.getStringArrayExtra(EXTRA_EXTENSIONS)?.toList() ?: emptyList()
         val initialDir = intent.getStringExtra(EXTRA_INITIAL_DIRECTORY)?.let { File(it) }
         val title = intent.getStringExtra(EXTRA_PICKER_TITLE)
+        val pickDir = intent.getBooleanExtra(EXTRA_PICK_DIRECTORY, false)
 
         setContent {
             WinlatorTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     FileManagerScreen(
                         pickMode = true,
+                        pickDirMode = pickDir,
                         pickExtensions = extensions,
                         initialDir = initialDir,
                         pickerTitle = title,
@@ -60,6 +62,7 @@ class FilePickerActivity : ComponentActivity() {
         const val EXTRA_EXTENSIONS = "extensions"
         const val EXTRA_INITIAL_DIRECTORY = "initialDirectory"
         const val EXTRA_PICKER_TITLE = "pickerTitle"
+        const val EXTRA_PICK_DIRECTORY = "pickDirectory"
         const val EXTRA_SELECTED_FILE = "selectedFile"
     }
 }

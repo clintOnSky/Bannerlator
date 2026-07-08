@@ -45,6 +45,21 @@ object InAppFilePicker {
         initialDir?.let { putExtra(FilePickerActivity.EXTRA_INITIAL_DIRECTORY, it) }
     }
 
+    /**
+     * Build an intent that opens the File Manager in DIRECTORY-pick mode (issue #70): only folders
+     * are listed and a "Select this folder" action returns the browsed directory's absolute path
+     * (read back via [pickedPath]).
+     */
+    fun buildDirIntent(
+        context: Context,
+        title: String? = null,
+        initialDir: String? = null,
+    ): Intent = Intent(context, FilePickerActivity::class.java).apply {
+        putExtra(FilePickerActivity.EXTRA_PICK_DIRECTORY, true)
+        title?.let { putExtra(FilePickerActivity.EXTRA_PICKER_TITLE, it) }
+        initialDir?.let { putExtra(FilePickerActivity.EXTRA_INITIAL_DIRECTORY, it) }
+    }
+
     /** Extract the picked path from an OK result's data intent, or null. */
     fun pickedPath(data: Intent?): String? =
         data?.getStringExtra(FilePickerActivity.EXTRA_SELECTED_FILE)
