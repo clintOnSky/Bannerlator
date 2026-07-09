@@ -39,6 +39,12 @@ object XServerDrawerState {
     @get:JvmName("getNativeRenderingEnabledState")
     val nativeRenderingEnabled: StateFlow<Boolean> = _nativeRenderingEnabled
 
+    // Read-only runtime-backend chip (Graphics tab header): arch + translator, plus the FEX unixlib
+    // mode. arch+translator are seeded immediately at launch; the unixlib segment fills in once the
+    // maps read resolves (~2-3s after the guest is up). Populated by XServerDisplayActivity.
+    private val _runtimeBackend = MutableStateFlow(RuntimeBackend())
+    val runtimeBackend: StateFlow<RuntimeBackend> = _runtimeBackend
+
     // bionic-fg live controls (frame generation + fps limiter), driven from the in-game drawer.
     // bionicFgActive = the layer is loaded this session (FG or limiter was on at launch); live
     // tuning only takes effect when true.
@@ -185,6 +191,8 @@ object XServerDrawerState {
     fun setNativeRenderingEnabled(v: Boolean) { _nativeRenderingEnabled.value = v }
     fun getNativeRenderingEnabled(): Boolean = _nativeRenderingEnabled.value
 
+    fun setRuntimeBackend(v: RuntimeBackend) { _runtimeBackend.value = v }
+
     fun setFullscreenMode(v: Int) { _fullscreenMode.value = v }
 
     fun setBionicFgActive(v: Boolean)      { _bionicFgActive.value = v }
@@ -219,6 +227,7 @@ object XServerDrawerState {
         _showLogs.value = false
         _showMagnifier.value = true
         _nativeRenderingEnabled.value = false
+        _runtimeBackend.value = RuntimeBackend()
         _bionicFgActive.value = false
         _frameGenEnabled.value = false
         _frameGenMultiplier.value = 2

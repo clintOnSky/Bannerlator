@@ -85,17 +85,43 @@ target_link_libraries(vulkan_renderer
 add_library(asurface_renderer SHARED
         asurfacerenderer/asurface_jni.cpp
         asurfacerenderer/ASurfaceRendererContext.cpp
+        asurfacerenderer/blit_converter.cpp
 )
 
 target_compile_options(asurface_renderer PRIVATE
         -Wall -Wextra -fvisibility=hidden -std=c++17
 )
 
+# EGL + GLESv3: the BGRA->RGBA GPU converter (blit_converter.cpp, GN #1620) owns a
+# private EGL context + GLES3.1 compute / GLES3.0 fragment blit on a dedicated thread.
 target_link_libraries(asurface_renderer
         log
         android
         dl
         atomic
+        EGL
+        GLESv3
+)
+
+# AHBImage native (GN #1620): the fenced 3-buffer CPU scanout swapchain used by the
+# ASR renderer for CPU-drawn window chrome. Kept as its own .so (mirrors GN) so it
+# is not dragged onto the GL/Vulkan path; AHBImage.java does loadLibrary("ahbimage").
+add_library(ahbimage SHARED
+        asurfacerenderer/ahbimage.c
+)
+
+target_compile_definitions(ahbimage PRIVATE
+        EGL_EGLEXT_PROTOTYPES
+        GL_GLEXT_PROTOTYPES
+)
+
+target_compile_options(ahbimage PRIVATE -Wall -Wextra)
+
+target_link_libraries(ahbimage
+        log
+        android
+        EGL
+        GLESv2
 )
 
 # Small standalone direct-scanout lib for the GL (and any non-Vulkan) renderer.

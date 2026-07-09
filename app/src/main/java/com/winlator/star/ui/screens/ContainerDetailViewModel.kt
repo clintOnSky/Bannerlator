@@ -79,6 +79,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var rendererDriverId    by mutableStateOf("system")
     var rendererFilterMode  by mutableStateOf(0)
     var rendererSwapRB      by mutableStateOf(false)
+    // SurfaceFlinger (ASR) BGRA->RGBA colour correction (GN #1620). Default ON = correct colours.
+    var rendererSfCompatMode by mutableStateOf(true)
     // Render scale (supersampling) — stored via the "renderScale" extra (no DB field). "1.0" = Off.
     var renderScale         by mutableStateOf("1.0")
     var autoCloseOnExit     by mutableStateOf(true)
@@ -313,6 +315,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         rendererDriverId         = c?.getRendererDriverId() ?: "system"
         rendererFilterMode       = c?.getRendererFilterMode() ?: 0
         rendererSwapRB           = c?.getRendererSwapRB() ?: false
+        rendererSfCompatMode     = c?.getRendererSfCompatMode() ?: true
         renderScale              = c?.getExtra("renderScale", "1.0") ?: "1.0"
         autoCloseOnExit          = (c?.getExtra("autoCloseOnExit", "1") ?: "1") == "1"
         selectedDXWrapper        = identifierToDisplay(c?.getDXWrapper() ?: Container.DEFAULT_DXWRAPPER, dxWrapperEntries)
@@ -621,6 +624,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             c.setRendererDriverId(rendererDriverId)
             c.setRendererFilterMode(rendererFilterMode)
             c.setRendererSwapRB(rendererSwapRB)
+            c.setRendererSfCompatMode(rendererSfCompatMode)
             c.putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
             c.putExtra("autoCloseOnExit", if (autoCloseOnExit) null else "0")  // default ON
             c.setInputType(inputType)
@@ -663,6 +667,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                 put("rendererDriverId", rendererDriverId)
                 put("rendererFilterMode", rendererFilterMode)
                 put("rendererSwapRB", rendererSwapRB)
+                put("rendererSfCompatMode", rendererSfCompatMode)
                 put("inputType", inputType)
                 put("startupSelection", selectedStartupSelection)
                 put("box64Version", selectedBox64Version)

@@ -64,6 +64,10 @@ public class Container {
     private String rendererDriverId = "system";
     private int rendererFilterMode = 0;
     private boolean rendererSwapRB = false;
+    // SurfaceFlinger (ASR) BGRA->RGBA colour correction (GN #1620). Default TRUE = correct colours
+    // (native GPU converter blits BGRA->RGBA before present); false = present BGRA directly, for
+    // displays that scan out BGRA natively. ASR-only — independent of rendererSwapRB (Vulkan/GL).
+    private boolean rendererSfCompatMode = true;
     // Fullscreen aspect-ratio mode (issue #71). Replaces the old fullscreenStretched boolean.
     public static final int FULLSCREEN_OFF = 0;      // windowed, letterboxed (preserve aspect)
     public static final int FULLSCREEN_FIT = 1;      // fullscreen-immersive, letterboxed (preserve aspect)
@@ -596,9 +600,11 @@ public class Container {
     public void setRendererFilterMode(int v) { this.rendererFilterMode = v; }
     public boolean getRendererSwapRB() { return rendererSwapRB; }
     public void setRendererSwapRB(boolean v) { this.rendererSwapRB = v; }
+    public boolean getRendererSfCompatMode() { return rendererSfCompatMode; }
+    public void setRendererSfCompatMode(boolean v) { this.rendererSfCompatMode = v; }
 
     public static String getDefaultVulkanConfig() {
-        return "native=false;presentMode=fifo;driverId=system;filterMode=0;swapRB=false";
+        return "native=false;presentMode=fifo;driverId=system;filterMode=0;swapRB=false;sfCompatMode=true";
     }
 
     public Iterable<String[]> drivesIterator() {
@@ -664,6 +670,8 @@ public class Container {
             if (!rendererDriverId.isEmpty()) data.put("rendererDriverId", rendererDriverId);
             if (rendererFilterMode != 0) data.put("rendererFilterMode", rendererFilterMode);
             if (rendererSwapRB) data.put("rendererSwapRB", true);
+            // Default is TRUE, so only persist the off state (absent token => correct colours).
+            if (!rendererSfCompatMode) data.put("rendererSfCompatMode", false);
             if (!WineInfo.isMainWineVersion(wineVersion)) data.put("wineVersion", wineVersion);
             FileUtils.writeString(getConfigFile(), data.toString());
         }
@@ -674,6 +682,8 @@ public class Container {
     public void loadData(JSONObject data) throws JSONException {
         wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
         dxwrapperConfig = "";
+        // Default TRUE (correct colours); an old config without the token must resolve to on.
+        rendererSfCompatMode = true;
         checkObsoleteOrMissingProperties(data);
 
         for (Iterator<String> it = data.keys(); it.hasNext(); ) {
@@ -794,6 +804,9 @@ public class Container {
                     break;
                 case "rendererSwapRB":
                     rendererSwapRB = data.getBoolean(key);
+                    break;
+                case "rendererSfCompatMode":
+                    rendererSfCompatMode = data.getBoolean(key);
                     break;
             }
         }
