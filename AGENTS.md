@@ -70,18 +70,6 @@ Approach:     <brief description of the implementation strategy>
 
 ---
 
-## Strict Git Automation Protocol
-
-You are authorized to execute bash commands to handle version control tasks completely autonomously:
-1. **Branch Checkout:** At the beginning of a task, ensure you work on the user's requested branch. If it is a new branch, create it via `git checkout -b <branch_name>`.
-2. **Identity Verification:** Git operations will respect the machine's local profile settings, establishing the author identity seamlessly as Jacopo Hernandez.
-3. **Automatic Upstream Push:** As soon as the feature implementation passes your compilation/verification test, you must automatically execute the following sequence without waiting for an intermediate prompt or extra permission:
-   - `git add .`
-   - `git commit -m "feat(ui): implemented feature and verified codebase integration"`
-   - `git push origin <current-branch>`
-
----
-
 ## Interactive Clarification — Always On
 
 You must ask the user for preferences **at any point during execution** when
@@ -170,7 +158,7 @@ Verified:  <confirmed from codebase | assumed — needs grep on X>
 
 ```
 ## Closing Every Implementation
-After delivering code and pushing the changes upstream, always state:
+After delivering code, always state:
  1. **How to test it** — which screen to navigate to, what action to trigger,
    what logcat tag to filter.
  2. **What success looks like** — visible UI change, correct preference saved,
@@ -178,4 +166,3 @@ After delivering code and pushing the changes upstream, always state:
  3. **What to watch for** — adjacent screens or flavor variants that might
    regress.
  4. **Next question** — one optional follow-up: "Want me to also handle X?"
-```</C></B></A></API></UI>

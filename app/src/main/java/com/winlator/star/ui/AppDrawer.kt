@@ -51,6 +51,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.preference.PreferenceManager
 import com.winlator.star.R
 import com.winlator.star.ui.theme.LocalAccentDim
 
@@ -75,6 +76,9 @@ fun AppDrawerContent(
 ) {
     var showHelp by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val showStores = remember(currentRoute) {
+        PreferenceManager.getDefaultSharedPreferences(context).getBoolean("show_store_features", true)
+    }
 
     if (showHelp) {
         HelpSupportDialog(
@@ -106,9 +110,11 @@ fun AppDrawerContent(
         DrawerItem(Screen.InputControls, currentRoute, onNavigate)
         DrawerItem(Screen.AdrenoTools,   currentRoute, onNavigate)
 
-        DrawerSectionHeader("Stores", note = "· unchanged", showDivider = true)
-        Screen.storeItems.forEach { screen ->
-            DrawerStoreItem(screen, onLaunchStore)
+        if (showStores) {
+            DrawerSectionHeader("Stores", note = "· unchanged", showDivider = true)
+            Screen.storeItems.forEach { screen ->
+                DrawerStoreItem(screen, onLaunchStore)
+            }
         }
 
         HorizontalDivider(

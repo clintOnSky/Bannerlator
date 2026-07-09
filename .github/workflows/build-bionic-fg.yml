@@ -41,11 +41,40 @@ jobs:
           # (xXJSONDeruloXx/bionic-fg). It covers:
           #   1. manifest: add spec-required `disable_environment` (else the
           #      glibc Vulkan loader skips the implicit layer at parse time);
-          #   2. present path: bound the cross-context fence waits (UINT64_MAX ->
-          #      250ms) so a wrapper-ICD semaphore mismatch degrades to a real
-          #      present + disables framegen instead of hanging (ANR/SIGQUIT);
-          #   3. drop two instance exts wrongly listed as device exts.
-          # All verified on-device 2026-06-19; see BIONIC_FG_INTEGRATION_REPORT.md §2.
+          #   2. single-device mode: FramegenContext adopts the app's own
+          #      VkDevice instead of creating a standalone second one (fixes a
+          #      cross-device fence deadlock/ANR on wrapper-ICD stacks);
+          #   3. present path: bound the copy/generated-frame fence waits
+          #      (UINT64_MAX -> a fixed/derived timeout) so a stuck wait
+          #      degrades to a real present + disables framegen after
+          #      kMaxFenceTimeouts consecutive misses, instead of hanging;
+          #   4. present path: replace the post-dispatch vkQueueWaitIdle() with
+          #      FramegenContext::waitLastDispatch(), a bounded wait on just the
+          #      framegen compute submission's own fence. In single-device mode
+          #      the old waitIdle() drained the WHOLE shared queue every
+          #      present — on GPUs with one universal queue family (most mobile
+          #      Adreno/Turnip parts) that's the same queue the game itself
+          #      renders on, so every present serialized on the game's own
+          #      in-flight work too. This was the leading cause of a reported
+          #      ~50% FPS drop + jitter under bionic-fg vs. lsfg-vk in a heavy
+          #      DXVK title (Bioshock 2, tracked separately);
+          #   5. drop two instance exts wrongly listed as device exts;
+          #   6. dispatch-routed vkGetPhysicalDeviceMemoryProperties (avoids a
+          #      crash calling the global symbol from inside a layer with a
+          #      chain-level physical-device handle);
+          #   7. generated-frame image acquire blocks for the next FIFO slot
+          #      (UINT64_MAX) instead of a non-blocking best-effort grab
+          #      (timeout=0) — mirrors lsfg-vk's Android pacing, avoids bursty
+          #      present-or-skip behavior under contention. Ported from
+          #      upstream's own (unmerged) fix, commit 86f80b8 on
+          #      origin/feat/future-refresh-pacing — cherry-picked alone; that
+          #      branch's larger async present-scheduler commits were NOT
+          #      taken (predate single-device-mode, would need a real merge).
+          # (1)-(3), (5)-(7) verified on-device 2026-06-19; see
+          # BIONIC_FG_INTEGRATION_REPORT.md §2 / BIONIC_FG_UPSTREAM_REPORT.md.
+          # (4) and (7) are local-build-verified only as of this comment —
+          # still need the on-device FPS/jitter re-test described in the fix's
+          # plan.
           git -C app/src/main/cpp/bionic-fg apply --verbose \
             "${GITHUB_WORKSPACE}/patches/bionic-fg-bannerlator-fixes.patch"
 
