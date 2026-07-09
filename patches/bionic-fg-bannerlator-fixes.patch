@@ -16,7 +16,7 @@ index 032a00e..afdb0c3 100644
      }
  }
 diff --git a/src/framegen_context.cpp b/src/framegen_context.cpp
-index 27e2f58..11781ac 100644
+index 27e2f58..0d58aeb 100644
 --- a/src/framegen_context.cpp
 +++ b/src/framegen_context.cpp
 @@ -188,6 +188,7 @@ static Pass makeModel1Pass(const vk::Device& dev,
@@ -42,8 +42,33 @@ index 27e2f58..11781ac 100644
          ctx->cmdPool_       = vk::CommandPool(ctx->device_);
          ctx->linearSampler_ = vk::Sampler(ctx->device_, VK_FILTER_LINEAR,
                                             VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER);
+@@ -871,6 +878,7 @@ void FramegenContext::present(AHardwareBuffer* newPrev, AHardwareBuffer* newCurr
+ 
+         fr.cmd.end();
+         fr.cmd.submit(device_, fr.fence.handle());
++        lastSubmitFence_ = fr.fence.handle();
+         frameIdx_++;
+         return;
+     }
+@@ -958,10 +966,16 @@ void FramegenContext::present(AHardwareBuffer* newPrev, AHardwareBuffer* newCurr
+ 
+     fr.cmd.end();
+     fr.cmd.submit(device_, fr.fence.handle());
++    lastSubmitFence_ = fr.fence.handle();
+     frameIdx_++;
+ }
+ #endif // __ANDROID__
+ 
++bool FramegenContext::waitLastDispatch(uint64_t timeoutNs) {
++    if (!device_.valid() || lastSubmitFence_ == VK_NULL_HANDLE) return true;
++    return vkWaitForFences(device_.handle(), 1, &lastSubmitFence_, VK_TRUE, timeoutNs) == VK_SUCCESS;
++}
++
+ void FramegenContext::updateConfig(const Config& cfg) {
+     cfg_ = cfg; cfg_.sanitize();
+     for (size_t k=0;k<uboSynth_.size();++k) {
 diff --git a/src/framegen_context.hpp b/src/framegen_context.hpp
-index 7175d1f..492a024 100644
+index 7175d1f..19bd92a 100644
 --- a/src/framegen_context.hpp
 +++ b/src/framegen_context.hpp
 @@ -56,7 +56,12 @@ public:
@@ -59,6 +84,31 @@ index 7175d1f..492a024 100644
          AHardwareBuffer* prevAhb,
          AHardwareBuffer* currAhb,
          const std::vector<AHardwareBuffer*>& outputAhbs,
+@@ -71,6 +76,13 @@ public:
+     void waitIdle();
+     void destroy();
+ 
++    // Waits (bounded) for the compute dispatch submitted by the most recent
++    // present() call to finish, without draining any other work on the
++    // shared queue/device the way waitIdle() does. Returns false on timeout
++    // (caller should treat the dispatch's output as not-yet-ready). Returns
++    // true if nothing has been submitted yet.
++    bool waitLastDispatch(uint64_t timeoutNs);
++
+     bool        valid()    const { return device_.valid(); }
+     std::string describe() const;
+ 
+@@ -172,6 +184,10 @@ private:
+     Frame    frames_[2];
+     uint32_t frameIdx_ = 0;
+ 
++    // Fence of the most recent present() dispatch submission (not owned —
++    // aliases one of frames_[].fence). Backs waitLastDispatch().
++    VkFence  lastSubmitFence_ = VK_NULL_HANDLE;
++
+ #ifdef __ANDROID__
+     AHardwareBuffer* prevAhbPtr_ = nullptr;
+     AHardwareBuffer* currAhbPtr_ = nullptr;
 diff --git a/src/jni_bridge.cpp b/src/jni_bridge.cpp
 index b7f3e03..e5fa182 100644
 --- a/src/jni_bridge.cpp
@@ -75,7 +125,7 @@ index b7f3e03..e5fa182 100644
      if (!ctx) { BFG_LOGE("nativeCreateContext: FramegenContext::create failed"); return 0L; }
      return bionic_fg::ctxToHandle(ctx.release());
 diff --git a/src/vk_layer/layer.cpp b/src/vk_layer/layer.cpp
-index 66d1934..da4c5ce 100644
+index 66d1934..4c7f1c1 100644
 --- a/src/vk_layer/layer.cpp
 +++ b/src/vk_layer/layer.cpp
 @@ -16,6 +16,7 @@
@@ -209,7 +259,7 @@ index 66d1934..da4c5ce 100644
      VkExtent2D extent = {};
      VkFormat   format = VK_FORMAT_UNDEFINED;
      std::vector<VkImage> images;
-@@ -415,6 +474,22 @@ struct SwapState {
+@@ -415,6 +474,26 @@ struct SwapState {
  
      uint64_t frameCount = 0;
      bool     inPresent  = false;
@@ -219,6 +269,10 @@ index 66d1934..da4c5ce 100644
 +    // disabled once either reaches kMaxFenceTimeouts.
 +    uint32_t copyFenceTimeouts = 0;
 +    uint32_t genFenceTimeouts  = 0;
++    // Consecutive timeouts waiting on the framegen compute dispatch's own
++    // completion fence (waitLastDispatch(), not the old full-queue waitIdle()).
++    // Independent counter for the same reason as the two above.
++    uint32_t dispatchFenceTimeouts = 0;
 +    // Sticky, runtime-only kill switch: once the present-path proves sync-
 +    // incompatible with this ICD we passthrough for the rest of THIS swapchain's
 +    // life. Kept separate from conf.enabled (which the file owns) so a conf.toml
@@ -232,7 +286,7 @@ index 66d1934..da4c5ce 100644
  
      void cleanup(const DeviceData& dd, VkDevice dev) {
          if (dd.deviceWaitIdle) dd.deviceWaitIdle(dev);
-@@ -455,7 +530,13 @@ static std::unique_ptr<bionic_fg::FramegenContext> createFramegenContext(
+@@ -455,7 +534,13 @@ static std::unique_ptr<bionic_fg::FramegenContext> createFramegenContext(
          const SwapState& st,
          const LayerConf& conf) {
      DisableLayerEnvGuard disableLayerForInternalVulkan;
@@ -246,7 +300,7 @@ index 66d1934..da4c5ce 100644
          st.prevAhb,
          st.currAhb,
          st.outAhbs,
-@@ -897,6 +978,15 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_CreateSwapchainKHR(
+@@ -897,6 +982,15 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_CreateSwapchainKHR(
          cpci.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
          dd.createCmdPool(device, &cpci, nullptr, &st.copyPool);
  
@@ -262,7 +316,31 @@ index 66d1934..da4c5ce 100644
          VkCommandBufferAllocateInfo cbai{};
          cbai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
          cbai.commandPool        = st.copyPool;
-@@ -1031,6 +1121,91 @@ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
+@@ -1013,14 +1107,21 @@ static VkResult callNextPresent(VkQueue queue, const VkPresentInfoKHR* presentIn
+ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
+                                       VkSwapchainKHR swapchain, VkSemaphore signalSemaphore,
+                                       uint32_t* imageIndex) {
++    // Pace generated presents by blocking until the presentation engine releases
++    // the next FIFO slot/image instead of best-effort grabbing whatever is
++    // immediately available. This mirrors lsfg-vk's Android path and avoids the
++    // bursty "present everything right now or skip it" behavior from timeout=0.
++    constexpr uint64_t kAcquireTimeoutNs = UINT64_MAX;
++
+     if (dd.acquireNextImage) {
+-        return dd.acquireNextImage(device, swapchain, 0, signalSemaphore, VK_NULL_HANDLE, imageIndex);
++        return dd.acquireNextImage(device, swapchain, kAcquireTimeoutNs,
++                                   signalSemaphore, VK_NULL_HANDLE, imageIndex);
+     }
+     if (dd.acquireNextImage2) {
+         VkAcquireNextImageInfoKHR info{};
+         info.sType      = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR;
+         info.swapchain  = swapchain;
+-        info.timeout    = 0;
++        info.timeout    = kAcquireTimeoutNs;
+         info.semaphore  = signalSemaphore;
+         info.fence      = VK_NULL_HANDLE;
+         info.deviceMask = 1;
+@@ -1031,6 +1132,91 @@ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
  
  // ─── QueuePresentKHR ──────────────────────────────────────────────────────────
  
@@ -354,7 +432,7 @@ index 66d1934..da4c5ce 100644
  VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          VkQueue queue,
          const VkPresentInfoKHR* pPresentInfo) {
-@@ -1122,7 +1297,42 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1122,7 +1308,42 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          }
      }
  
@@ -398,7 +476,7 @@ index 66d1934..da4c5ce 100644
          return callNextPresent(queue, pPresentInfo);
      if (imgIdx >= st.images.size()) {
          BFG_LAYER_E("present image index %u out of range (%zu); passing through", imgIdx, st.images.size());
-@@ -1155,8 +1365,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1155,8 +1376,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
      // --- Step 1: Copy real swapchain image into current AHB input. The copy
      // waits on the application's original present semaphores, so the final real
      // present must not wait on those same binary semaphores again.
@@ -414,7 +492,7 @@ index 66d1934..da4c5ce 100644
          BFG_LAYER_E("copy fence wait/reset failed; passing through");
          return callNextPresent(queue, pPresentInfo);
      }
-@@ -1234,11 +1449,18 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1234,16 +1460,34 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          finalPresent.pWaitSemaphores = nullptr;
      }
  
@@ -435,7 +513,24 @@ index 66d1934..da4c5ce 100644
  
      // --- Step 2: Run framegen after we have both previous and current inputs.
      if (st.frameCount > 0) {
-@@ -1267,7 +1489,25 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+         st.fgCtx->present(st.prevAhb, st.currAhb);
+-        st.fgCtx->waitIdle();
++        // Bound to just THIS dispatch's own completion fence instead of a full
++        // vkQueueWaitIdle() on the shared queue: in single-device mode that
++        // queue is also the app's own render queue on GPUs with one universal
++        // queue family (the common mobile case), so waitIdle() was draining the
++        // game's own in-flight work every present, not just ours. On timeout,
++        // degrade to a real-frame present this cycle instead of blitting from
++        // an output whose completion isn't proven.
++        if (!st.fgCtx->waitLastDispatch(syncFenceTimeoutNs(st.conf))) {
++            BFG_LAYER_E("framegen dispatch fence wait timed out; skipping generated frames this present");
++            noteFenceTimeout(st, st.dispatchFenceTimeouts, "framegen-dispatch");
++        } else {
++        st.dispatchFenceTimeouts = 0;   // dispatch fence signalled; sync working
+         for (auto& out : st.outProducerImgs) {
+             out.layout = VK_IMAGE_LAYOUT_GENERAL;
+             out.externalOwner = true;
+@@ -1267,7 +1511,25 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
                  continue;
              }
  
@@ -462,7 +557,7 @@ index 66d1934..da4c5ce 100644
              dd.resetFences(device, 1, &st.genFences[k]);
              VkCommandBuffer genCmd = st.genCmds[k];
              dd.resetCmdBuf(genCmd, 0);
-@@ -1338,6 +1578,17 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1338,8 +1600,20 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
              genPresent.swapchainCount     = 1;
              genPresent.pSwapchains        = &swapchain;
              genPresent.pImageIndices      = &genIdx;
@@ -479,7 +574,10 @@ index 66d1934..da4c5ce 100644
 +            }
              dd.queuePresent(queue, &genPresent);
          }
++        }
      }
+ 
+     std::swap(st.prevAhb, st.currAhb);
 diff --git a/src/vulkan/vk_impl.cpp b/src/vulkan/vk_impl.cpp
 index 4f864eb..aaa1bb0 100644
 --- a/src/vulkan/vk_impl.cpp
