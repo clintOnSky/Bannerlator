@@ -2266,7 +2266,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // ASR has no compositor copyArea path either, so drive the perf HUD per present (same as
         // the Vulkan tick above) — otherwise the HUD shows no FPS under the SurfaceFlinger renderer.
         if (renderer instanceof com.winlator.star.renderer.ASurfaceRenderer) {
-            ((com.winlator.star.renderer.ASurfaceRenderer) renderer).setHudFrameTick(wid -> {
+            com.winlator.star.renderer.ASurfaceRenderer asr =
+                    (com.winlator.star.renderer.ASurfaceRenderer) renderer;
+            // BGRA->RGBA colour correction (GN #1620): apply the resolved per-game/container flag before
+            // the surface is created. Mirrors the Vulkan/GL setSwapRB launch seeds; ASR-only, independent
+            // of swapRB. Default TRUE = correct colours.
+            asr.setSfCompatMode(resolvedSfCompatMode());
+            asr.setHudFrameTick(wid -> {
                 if (wid == frameRatingWindowId) {
                     if (frameRating != null) frameRating.update();
                     if (frameRatingHorizontal != null) frameRatingHorizontal.update();
@@ -3714,6 +3720,15 @@ return true;
     private String resolvedRenderer() {
         if (container == null) return "vulkan";
         return shortcut != null ? shortcut.getExtra("renderer", container.getRenderer()) : container.getRenderer();
+    }
+
+    // Per-game override for the SurfaceFlinger (ASR) BGRA->RGBA colour correction (GN #1620). Default
+    // TRUE (correct colours). Read-only, same discipline as resolvedRenderer() — never written back.
+    private boolean resolvedSfCompatMode() {
+        if (container == null) return true;
+        return shortcut != null
+                ? shortcut.getExtra("sfCompatMode", container.getRendererSfCompatMode() ? "1" : "0").equals("1")
+                : container.getRendererSfCompatMode();
     }
 
     private String resolvedFrameGenEngine() {
