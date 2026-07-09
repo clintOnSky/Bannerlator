@@ -32,7 +32,11 @@ public class ContentsManager {
             "${syswow64}/d3d12core.dll", "${syswow64}/d3d12.dll"};
     public static final String[] BOX64_TRUST_FILES = {"${bindir}/box64"};
     public static final String[] WOWBOX64_TRUST_FILES = {"${system32}/wowbox64.dll"};
-    public static final String[] FEXCORE_TRUST_FILES = {"${system32}/libwow64fex.dll", "${system32}/libarm64ecfex.dll"};
+    // The two DLLs (system32) plus, for unixlib FEXCore builds, the native .so in the shared
+    // aarch64-unix slot. Tracking the .so here (a) marks it trusted on install and (b) lets
+    // removeContent() strip it from the shared slot on uninstall (see below).
+    public static final String[] FEXCORE_TRUST_FILES = {"${system32}/libwow64fex.dll", "${system32}/libarm64ecfex.dll",
+            "${libdir}/wine/aarch64-unix/libwow64fex.so", "${libdir}/wine/aarch64-unix/libarm64ecfex.so"};
     public static final String[] VEGAS_TRUST_FILES = {"${system32}/d3d8.dll", "${system32}/d3d9.dll", "${system32}/d3d10.dll", "${system32}/d3d10_1.dll",
             "${system32}/d3d10core.dll", "${system32}/d3d11.dll", "${system32}/dxgi.dll", "${syswow64}/d3d8.dll", "${syswow64}/d3d9.dll", "${syswow64}/d3d10.dll",
             "${syswow64}/d3d10_1.dll", "${syswow64}/d3d10core.dll", "${syswow64}/d3d11.dll", "${syswow64}/dxgi.dll"};
@@ -376,6 +380,16 @@ public class ContentsManager {
 
     public void removeContent(ContentProfile profile) {
         if (profilesMap.get(profile.type).contains(profile)) {
+            // A unixlib FEXCore drops a native .so into the SHARED aarch64-unix slot; deleting only
+            // the per-version install dir would leave that .so behind (and Proton's loader would keep
+            // loading it). Strip any .so this profile applied to the shared slot. The launch-time
+            // reconcile re-materializes the correct .so for whatever version a game next selects.
+            if (profile.type == ContentProfile.ContentType.CONTENT_TYPE_FEXCORE && profile.fileList != null) {
+                for (ContentProfile.ContentFile contentFile : profile.fileList) {
+                    if (contentFile.target != null && contentFile.target.endsWith(".so"))
+                        new File(getPathFromTemplate(contentFile.target)).delete();
+                }
+            }
             FileUtils.delete(getInstallDir(context, profile));
             profilesMap.get(profile.type).remove(profile);
             syncContents();

@@ -139,7 +139,75 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             container.putExtra("fexcoreVersion", fexcoreVersion);
             containerDataChanged = true;
         }
+
+        // Re-stamp the shared FEX unixlib .so slot to match the DLLs applied above. Done
+        // UNCONDITIONALLY (not gated on the version-change cache) so the shared slot always agrees
+        // with the effective per-game/per-container FEXCore choice, even after arbitrary flipping.
+        reconcileFexUnixlib(fexcoreVersion);
+
         if (containerDataChanged) container.saveData();
+    }
+
+    // The FEX unixlib .so names we own. The truncated variants are defensive: old testing produced
+    // symlinks with a dropped trailing char (libarm64ecfe.so / libwow64fe.so) that could linger.
+    private static final String[] FEX_UNIXLIB_SO_NAMES = {
+            "libarm64ecfex.so", "libwow64fex.so", "libarm64ecfe.so", "libwow64fe.so"
+    };
+
+    /**
+     * Materialize the effective FEXCore version's native unixlib COMPLETELY: the shared
+     * {@code <imagefs>/usr/lib/wine/aarch64-unix/} slot must equal that one version's {@code .so},
+     * or be EMPTY when the version is DLL-only. Proton's ntdll loader auto-searches that dir, so a
+     * stale {@code .so} left by a previous unix install would be loaded even when the game picked a
+     * DLL-only FEX (and could pair a build-A {@code .dll} with a build-B {@code .so}). Recomputed
+     * fresh each launch from the resolved {@code fexcoreVersion}, keeping the {@code .dll} (system32)
+     * and {@code .so} (shared slot) halves matched to a single version.
+     *
+     * The {@code .so} source is the SAME per-version staging the DLLs come from: a component's
+     * install dir ({@link ContentsManager#getInstallDir}) retains every profile file, including the
+     * unixlib {@code .so} (profile target {@code ${libdir}/wine/aarch64-unix/...}). The bundled asset
+     * FEX has no profile and is DLL-only, so the slot is simply left cleared for a clean DLL run.
+     *
+     * NOTE: one game runs at a time (Bannerlator), so a single shared slot is safe. Concurrent
+     * multi-instance with different FEX versions would need per-container .so isolation (future work).
+     */
+    private void reconcileFexUnixlib(String fexcoreVersion) {
+        Context context = environment.getContext();
+        File soDir = new File(environment.getImageFs().getLibDir(), "wine/aarch64-unix");
+        try {
+            if (!soDir.exists()) soDir.mkdirs();
+
+            // 1) Strip the fex unixlibs first (never touch the real wine unixlibs: bcrypt.so, etc.).
+            for (String name : FEX_UNIXLIB_SO_NAMES) {
+                File stale = new File(soDir, name);
+                if (stale.exists()) stale.delete();
+            }
+
+            // 2) If the effective version is a unixlib component, copy ITS retained .so back in.
+            //    Bundled/DLL-only FEX (no profile, or a profile with no .so) leaves the slot empty.
+            boolean copied = false;
+            ContentProfile profile = contentsManager.getProfileByEntryName("fexcore-" + fexcoreVersion);
+            if (profile != null && profile.fileList != null) {
+                File installDir = ContentsManager.getInstallDir(context, profile);
+                for (ContentProfile.ContentFile cf : profile.fileList) {
+                    String base = new File(cf.target).getName();
+                    if (base.equals("libarm64ecfex.so") || base.equals("libwow64fex.so")) {
+                        File src = new File(installDir, cf.source);
+                        if (src.exists()) {
+                            File dst = new File(soDir, base);
+                            FileUtils.copy(src, dst);
+                            FileUtils.chmod(dst, 0755);
+                            copied = true;
+                        }
+                    }
+                }
+            }
+
+            Log.d("GuestProgramLauncherComponent", "FEX unixlib reconcile: " + fexcoreVersion
+                    + " -> " + (copied ? "copied .so" : "DLL-only, cleared"));
+        } catch (Exception e) {
+            Log.e("GuestProgramLauncherComponent", "FEX unixlib reconcile failed: " + e.getMessage());
+        }
     }
 
     public GuestProgramLauncherComponent(ContentsManager contentsManager, ContentProfile wineProfile, Shortcut shortcut) {
@@ -198,6 +266,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 pid = -1;
             }
         }
+    }
+
+    // Linux PID of the top-level guest process (wine/box64). Used read-only by the runtime-backend
+    // HUD chip to probe /proc/<pid>/maps for the FEX unixlib. -1 until the guest is started.
+    public static int getPid() {
+        return pid;
     }
 
     public Callback<Integer> getTerminationCallback() {

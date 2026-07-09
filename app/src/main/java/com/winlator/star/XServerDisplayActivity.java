@@ -46,6 +46,9 @@ import androidx.preference.PreferenceManager;
 import androidx.compose.ui.platform.ComposeView;
 import com.winlator.star.ui.XServerDrawerKt;
 import com.winlator.star.ui.XServerDrawerState;
+import com.winlator.star.ui.RuntimeBackend;
+import com.winlator.star.ui.FexMode;
+import com.winlator.star.ui.FexProbe;
 import com.winlator.star.ui.XServerDialogHostKt;
 import com.winlator.star.ui.XServerDialogState;
 import com.winlator.star.container.Container;
@@ -2535,7 +2538,38 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ds.setDebandEnabled(false); ds.setDebandStrength(100);
     }
 
+    // Read-only runtime-backend HUD chip (Graphics tab header). arch + translator are known
+    // immediately from the resolved launch config; the FEX unixlib mode is filled in a few seconds
+    // later once /proc/<pid>/maps has the .so mapped. Purely diagnostic — touches nothing.
+    private void seedRuntimeBackend() {
+        boolean arm64ec = wineInfo != null && wineInfo.isArm64EC();
+        String arch = arm64ec ? "arm64ec" : "x86-64";
+        String emu = emulator == null ? "" : emulator.toLowerCase();
+        String translator;
+        if (!arm64ec) translator = "Box64";                 // x86-64 always runs under box64
+        else if (emu.contains("wowbox64")) translator = "wowbox64";
+        else translator = "FEXCore";
+
+        // Seed arch+translator now (fexMode NA); the poll below resolves the unixlib segment.
+        XServerDrawerState.INSTANCE.setRuntimeBackend(new RuntimeBackend(arch, translator, FexMode.NA));
+
+        // Box64/x86-64 never uses the FEX unixlib, so there's no maps token to probe.
+        if (!arm64ec) return;
+
+        new Thread(() -> {
+            FexMode mode = FexMode.NA;
+            // The unixlib .so maps ~2-3s after the guest is up; poll with a short backoff.
+            for (int i = 0; i < 15 && mode == FexMode.NA; i++) {
+                try { Thread.sleep(1500); } catch (InterruptedException e) { return; }
+                mode = FexProbe.detect(GuestProgramLauncherComponent.getPid());
+            }
+            XServerDrawerState.INSTANCE.setRuntimeBackend(new RuntimeBackend(arch, translator, mode));
+        }, "fexmode-probe").start();
+    }
+
     private void initInlineTabStates(HostRenderer renderer) {
+        seedRuntimeBackend();
+
         // SGSR/HDR/screen-effect shaders are GL EffectComposer features; the Vulkan renderer has no
         // post-process pipeline, so their callbacks below are never set. Flag it so the drawer grays
         // those toggles out instead of showing dead switches.
