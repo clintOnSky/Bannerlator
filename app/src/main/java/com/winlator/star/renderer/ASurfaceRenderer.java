@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * SurfaceFlinger host renderer (ASurfaceRenderer / "ASR").
@@ -51,6 +53,25 @@ public class ASurfaceRenderer implements HostRenderer,
     public static boolean isSupported() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
     }
+
+    // Bumped every time a fresh native context is created (nativeInit). AHBImage uses this to
+    // (re)register its CPU scanout swapchain with the current context's GPU converter exactly
+    // once per context generation. See AHBImage.prepareScanoutSources().
+    private static final AtomicLong NATIVE_CONTEXT_GENERATION = new AtomicLong();
+    static long getNativeContextGeneration() { return NATIVE_CONTEXT_GENERATION.get(); }
+
+    // BGRA->RGBA colour-compat conversion toggle (GN #1620). When true (default) the native ASR
+    // GPU converter turns each BGRA source buffer into an RGBA buffer before handing it to
+    // SurfaceFlinger; when false the source buffer is presented directly (for displays that scan
+    // out BGRA natively, avoiding the blit). Wired to a per-container/per-game setting by the UI
+    // layer via setSfCompatMode() at launch. See setSfCompatMode() / pushWindowBuffer().
+    private boolean sfCompatMode = true;
+    public void setSfCompatMode(boolean enabled) { this.sfCompatMode = enabled; }
+    public boolean isSfCompatMode() { return sfCompatMode; }
+
+    // #1644: CPU-drawn chrome is scanned out at half the rate of the game frame; this counter
+    // gates the per-present HUD tick for the CPU path so the HUD still reflects the game cadence.
+    private final AtomicInteger skipFPSCount = new AtomicInteger(0);
 
     public final XServerView xServerView;
     private final XServer xServer;
@@ -122,6 +143,8 @@ public class ASurfaceRenderer implements HostRenderer,
         }
         surfaceInitialized = nativeInit(surface, xServer.screenInfo.width, xServer.screenInfo.height);
         if (surfaceInitialized) {
+            NATIVE_CONTEXT_GENERATION.incrementAndGet();
+            skipFPSCount.set(0);
             nativeSetSfCallbackTarget(this);
             updateTransform();
             nativeInitScanout();
@@ -152,6 +175,7 @@ public class ASurfaceRenderer implements HostRenderer,
             nativeDestroy();
             surfaceInitialized = false;
         }
+        skipFPSCount.set(0);
         windowSurfaces.clear();
         cachedDesktopDst = null;
     }
@@ -367,14 +391,48 @@ public class ASurfaceRenderer implements HostRenderer,
     private void pushWindowBuffer(int windowId, Drawable drawable) {
         if (!windowSurfaces.containsKey(windowId)) return; // SC not created yet; updateScene will
         synchronized (drawable.renderLock) {
-            if (drawable.getTexture() instanceof GPUImage) {
-                long ahbPtr = ((GPUImage) drawable.getTexture()).getHardwareBufferPtr();
-                if (ahbPtr != 0) {
-                    nativeSetWindowBuffer(windowId, ahbPtr, -1, windowId, 0);
-                    if (hudFrameTick != null) hudFrameTick.accept(windowId);
-                }
+            if (drawable.getTexture() instanceof AHBImage) {
+                pushCpuImageToNative(windowId, (AHBImage) drawable.getTexture());
+            } else if (drawable.getTexture() instanceof GPUImage) {
+                pushGpuImageToNative(windowId, (GPUImage) drawable.getTexture());
             }
         }
+    }
+
+    /**
+     * CPU-drawn window chrome (ASR-mode Drawables are AHBImage-backed). Copies the freshly drawn
+     * pixels into the next fenced swapchain slot and hands it to SurfaceFlinger with acquire/release
+     * fences (the SurfaceFlinger CPU-image crash/tearing fix). The GPU converter turns BGRA->RGBA
+     * when {@link #sfCompatMode} is on. Caller holds {@code drawable.renderLock}.
+     */
+    private void pushCpuImageToNative(int windowId, AHBImage g) {
+        g.prepareScanoutSources();
+        long ahbPtr = g.getScanoutHardwareBufferPtr();
+        if (ahbPtr == 0) return;
+        int acquireFence = g.consumeAcquireFence();
+        // R/B swap is handled per-slot by the CPU copy + native converter; slot/AHBImage let the
+        // native side return the release fence to the swapchain slot it just consumed.
+        nativeSetWindowBuffer(windowId, ahbPtr, acquireFence, 0, 0, g, g.getLastUsedSlot(), sfCompatMode);
+        // #1644: half-rate HUD tick for CPU chrome.
+        if (hudFrameTick != null) {
+            if (skipFPSCount.getAndIncrement() >= 1) {
+                skipFPSCount.set(0);
+                hudFrameTick.accept(windowId);
+            }
+        }
+    }
+
+    /**
+     * Direct game-frame present (the DXVK/DRI3/Present buffer is a GPUImage — a real
+     * AHardwareBuffer). No swapchain/fence swap: the buffer is presented directly, still routed
+     * through the native BGRA->RGBA converter when {@link #sfCompatMode} is on.
+     * Caller holds {@code drawable.renderLock}.
+     */
+    private void pushGpuImageToNative(int windowId, GPUImage g) {
+        long ahbPtr = g.getHardwareBufferPtr();
+        if (ahbPtr == 0) return;
+        nativeSetWindowBuffer(windowId, ahbPtr, -1, windowId, 0, null, -1, sfCompatMode);
+        if (hudFrameTick != null) hudFrameTick.accept(windowId);
     }
 
     // -------------------------------------------------------------------------
@@ -508,7 +566,11 @@ public class ASurfaceRenderer implements HostRenderer,
     private native void nativeInitScanout();
     private native boolean nativeReattachSurface(Surface surface);
     private native void nativeDestroyScanout();
-    private native void nativeSetWindowBuffer(long contentId, long ahbPtr, int fenceFd, long windowId, long serial);
+    private native void nativeSetWindowBuffer(long contentId, long ahbPtr, int fenceFd, long windowId,
+            long serial, AHBImage ahbImage, int slot, boolean sfCompatMode);
+    // CPU scanout swapchain (AHBImage) registration with the native GPU converter (GN #1620).
+    static native boolean nativePrepareCpuSourceBuffers(long ahb0, long ahb1, long ahb2);
+    static native void nativeReleaseCpuSourceBuffers(long ahb0, long ahb1, long ahb2);
     private native void nativeScanoutSetCursorVisibility(boolean visible);
     private native void nativeRegisterWindowSC(long contentId, String debugName);
     private native void nativeUnregisterWindowSC(long contentId);

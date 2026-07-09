@@ -463,7 +463,11 @@ private fun GraphicsContent(state: XServerDrawerState) {
         XServerDialogState.onInitGraphicsTab?.run()
     }
 
-    SectionHeader("Graphics")
+    // Title on the left, runtime-backend diagnostic chip pinned top-right.
+    Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+        Box(Modifier.weight(1f)) { SectionHeader("Graphics") }
+        RuntimeBackendChip(state)
+    }
 
     // Frame Generation pinned to the top of the Graphics tab.
     FrameGenSection(state)
@@ -710,6 +714,42 @@ private fun GraphicsContent(state: XServerDrawerState) {
     // nativeRenderingEnabled is collected once at the top of GraphicsContent (drives the GL grey-out).
     ToggleRow("Native Rendering", nativeRenderingEnabled) { state.onNativeRenderingToggle?.run() }
 
+}
+
+// ───── Runtime-backend diagnostic chip (Graphics tab header) ─────
+// Read-only status: arch · translator, plus the FEX unixlib mode. unixlib (native .so loaded) =
+// accent/green; DLL (self-contained FEX DLL path) = muted. Box64/x86-64 shows no unixlib segment.
+// It is a status readout, never a "faster" flag. Hidden until the activity seeds arch+translator.
+@Composable
+private fun RuntimeBackendChip(state: XServerDrawerState) {
+    val backend by state.runtimeBackend.collectAsState()
+    if (!backend.isValid) return
+
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .padding(top = 2.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(
+            "${backend.arch} · ${backend.translator}",
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium
+        )
+        if (backend.showsFexMode) {
+            val (label, color) = when (backend.fexMode) {
+                FexMode.UNIXLIB -> "unixlib" to Color(0xFF4CAF50) // native .so loaded
+                FexMode.DLL     -> "DLL"     to muted             // self-contained DLL path
+                FexMode.NA      -> "N/A"     to muted             // maps not resolved yet
+            }
+            Text(" · ", color = muted, fontSize = 10.sp)
+            Text(label, color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
 }
 
 // ───── Frame Generation section (pinned to top of Graphics tab) ─────

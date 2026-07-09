@@ -957,6 +957,13 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         )
     }
 
+    // SurfaceFlinger colour correction (ASR-only, GN #1620) — per-game override, defaults to the
+    // container's value. Stored via the shortcut "sfCompatMode" extra ("1"/"0"). Default ON.
+    var sfCompatMode by remember {
+        mutableStateOf(shortcut.getExtra("sfCompatMode",
+            if (shortcut.container.getRendererSfCompatMode()) "1" else "0") == "1")
+    }
+
     // Render scale (supersampling) — per-game override, defaults to the container's "renderScale"
     // extra. Stored via the shortcut "renderScale" extra. "1.0" = Off.
     var renderScale by remember {
@@ -1260,6 +1267,7 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             putExtra("graphicsDriver", StringUtils.parseIdentifier(selectedGfxDriver))
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
             putExtra("renderer", StringUtils.parseIdentifier(selectedRenderer))
+            putExtra("sfCompatMode", if (sfCompatMode) "1" else "0")
             putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
             putExtra("frameGenEngine", frameGenEngine)
             putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
@@ -1440,6 +1448,22 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                             onConfirm = { selectedRenderer = "SurfaceFlinger"; showSfWarning = false },
                             onDismiss = { showSfWarning = false }
                         )
+                    }
+
+                    // SurfaceFlinger colour correction (ASR-only, GN #1620) — only relevant when this
+                    // game runs on the SurfaceFlinger renderer, so surface it under that choice.
+                    if (selectedRenderer == "SurfaceFlinger") {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.renderer_sf_compat))
+                                Text(
+                                    stringResource(R.string.renderer_sf_compat_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
+                        }
                     }
 
                     // Render scale (supersampling) — per-game override of the container default.

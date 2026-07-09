@@ -4,7 +4,9 @@ import android.graphics.Bitmap;
 
 import com.winlator.star.core.Callback;
 import com.winlator.star.math.Mathf;
+import com.winlator.star.renderer.AHBImage;
 import com.winlator.star.renderer.GPUImage;
+import com.winlator.star.renderer.NativeTexture;
 import com.winlator.star.renderer.Texture;
 
 import java.nio.ByteBuffer;
@@ -21,12 +23,15 @@ public class Drawable extends XResource {
     public final Object renderLock = new Object();
     private boolean directScanout = false;
 
-    // SurfaceFlinger (ASR) renderer mode: when enabled, every Drawable is backed by a
-    // composer-compatible AHardwareBuffer (a GPUImage) and its CPU `data` IS the AHB's mapped
-    // memory — so the X server draws straight into a buffer SurfaceFlinger can scan out. Global
-    // static (footgun): MUST default false and only flip true while ASR is the active renderer.
+    // SurfaceFlinger (ASR) renderer mode: when enabled, every CPU-drawn Drawable is backed by an
+    // AHBImage — a fenced three-buffer scanout swapchain (GN #1620) — and its CPU `data` IS the
+    // AHB's mapped memory, so the X server draws straight into a buffer SurfaceFlinger can scan
+    // out (with acquire/release fences, which prevents the SurfaceFlinger CPU-image crash/tearing).
+    // Global static (footgun): MUST default false and only flip true while ASR is the active
+    // renderer — GL/Vulkan keep the plain ByteBuffer + GPUImage path unchanged.
     private static boolean DRAWABLE_FOR_ASR = false;
     public static void setAsrMode(boolean value) { DRAWABLE_FOR_ASR = value; }
+    public static boolean IS_ASR() { return DRAWABLE_FOR_ASR; }
 
     static {
         System.loadLibrary("winlator");
@@ -38,7 +43,7 @@ public class Drawable extends XResource {
         this.height = (short)height;
         this.visual = visual;
         if (DRAWABLE_FOR_ASR && width > 0 && height > 0) {
-            GPUImage g = new GPUImage((short)width, (short)height);
+            AHBImage g = new AHBImage((short)width, (short)height);
             ByteBuffer vd = g.getHardwareBufferPtr() != 0 ? g.getVirtualData() : null;
             if (vd != null) {
                 this.texture = g;
@@ -66,16 +71,16 @@ public class Drawable extends XResource {
     }
 
     public void setTexture(Texture texture) {
-        if (texture instanceof GPUImage) {
-            ByteBuffer vd = ((GPUImage)texture).getVirtualData();
+        if (texture instanceof NativeTexture) {
+            ByteBuffer vd = ((NativeTexture)texture).getVirtualData();
             if (vd != null) data = vd;
         }
         this.texture = texture;
     }
 
     public void refreshDataFromTexture() {
-        if (texture instanceof GPUImage) {
-            ByteBuffer vd = ((GPUImage)texture).getVirtualData();
+        if (texture instanceof NativeTexture) {
+            ByteBuffer vd = ((NativeTexture)texture).getVirtualData();
             if (vd != null) data = vd;
         }
     }
@@ -100,7 +105,7 @@ public class Drawable extends XResource {
     }
 
     private short getStride() {
-        return texture instanceof GPUImage ? ((GPUImage)texture).getStride() : width;
+        return texture instanceof NativeTexture ? ((NativeTexture)texture).getStride() : width;
     }
 
     public Runnable getOnDrawListener() {

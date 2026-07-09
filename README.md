@@ -51,13 +51,26 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.5** — built from Star **marcescence** (`versionName 2.5`, `versionCode 40`) |
+| **Version** | Bannerlator **V 2.5.1** — built from Star **marcescence** (`versionName 2.5.1`, `versionCode 41`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
 ---
 
-## 🆕 What's New in 2.5
+## 🆕 What's New in 2.5.1
+
+2.5.1 is a **compatibility-and-tooling** follow-up to 2.5: it fixes crashes and swapped colours on the **SurfaceFlinger** renderer, adds a live **FEX runtime indicator** so you can see exactly what's translating your game, makes **FEXCore unixlib (`.so`)** handling correct when you swap FEXCore versions per game, and expands the **Environment Variable presets**. Like 2.5 it's an **app-side** update — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.5.
+
+**🎨 SurfaceFlinger renderer: colour & crash fix — new.** The **SurfaceFlinger** host renderer (ASurfaceRenderer) gets a crash-and-colour-accuracy fix: the red/blue channel swap is corrected, a GPU-side format converter and proper fencing are added, and the OpenGL / Vulkan / DRI3 paths are left untouched. A new **"Correct SurfaceFlinger colours"** toggle is available **per container and per game** (shown inline under the **Renderer** picker when SurfaceFlinger is selected, on by default). Device-verified on **Adreno 750**: *DiRT 3* on **DXVK + SurfaceFlinger** renders with correct colours, no R/B swap, and no Vulkan / OpenGL regression. *(Ported from [GameNative](https://github.com/utkarshdalal/GameNative) #1620 / #1644.)*
+
+**🔎 FEX runtime indicator — new.** The **Graphics** tab now shows a live badge, read straight from the running game: **arm64ec** vs **x86-64**, the translator (**FEXCore / wowbox64 / Box64**), and — for FEXCore — whether the native **unixlib (`.so`)** or the classic **DLL** path is active. No more guessing what's under the hood.
+
+**🧩 FEXCore unixlib (`.so`) auto-match — new.** Users run different FEXCore versions per game or container — some DLL-only, some with the native `.so` unixlib. 2.5.1 keeps the shared `.so` **in sync with your selection on every launch**: a unixlib build gets its **matching** `.so` placed, a DLL-only build gets it **cleared**. No stale `.so` silently overriding a DLL-only choice, no mismatched `.dll` / `.so` pair — and uninstalling a unixlib FEXCore removes its `.so` too.
+
+**🧰 18 new Environment Variable presets — new.** The **Add Environment Variable** picker gained **18 presets** across **DXVK / VKD3D / Wine / Mesa** — including `DXVK_DISABLE_TIMELINE_SEMAPHORES`, `VKD3D_SHADER_MODEL`, `DXVK_FRAME_RATE`, `VKD3D_CONFIG`, `WINEFSYNC`, `WINE_FULLSCREEN_FSR` and `MESA_VK_WSI_PRESENT_MODE` — so common tuning vars are one tap away instead of typed by hand. *(Requested by Angel.)*
+
+<details>
+<summary><b>Previously in 2.5</b> — the Mali hardening release</summary>
 
 2.5 is the **Mali hardening** release. If you're on a **Mali** or **Xclipse** GPU, this is the big one: **BC-texture (BCn) games that used to crash or render as black / garbled textures now work**, backed by a full sign-off on real **Mali-G57** hardware — plus an **in-game logging overhaul** so reporting a problem no longer means digging through `Android/data`. It's an **app-side** update — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; the new Mali driver assets are pulled into your existing containers automatically on next launch.
 
@@ -66,6 +79,8 @@
 **🧾 In-game logging overhaul — new.** Reporting a bug from inside a game is finally painless: a **Copy button** in the in-game Debug Logs panel copies the whole log (including BCn transfer stats) to the clipboard; a **selectable log location** (**Settings → Logs**: App data, Download, Documents or a custom folder) lets you grab every log straight from a file manager with **no shizuku / adb**; **DXVK, DXGI and VKD3D logs are co-located** with the Wine log in one folder (they no longer hide in the game directory); and the **Wine Debug Channels** dialog now **scrolls**. *(All three ideas from @kylinzang — [#70](https://github.com/The412Banner/Bannerlator/issues/70).)*
 
 **🔧 Fixes.** The `wrapper_DestroyBuffer: null buffer` **log spam is eliminated** (bundled Vulkan wrapper bumped to **ETC2-Milestone-2**); the in-game **Copy-logs action row is pinned on-screen** (it was pushed off the bottom in landscape); and the **release-notes pipeline is hardened** against backticks / shell metacharacters.
+
+</details>
 
 <details>
 <summary><b>Previously in 2.4</b> — the fit & finish release</summary>
@@ -160,7 +175,7 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - **Wine** Windows compatibility layer — run native Win32/Win64 applications and games.
 - **Box64 / Box86** x86 & x86-64 → ARM translation, with selectable performance presets.
 - **WOWBox64** for arm64ec containers (correctly labelled per container).
-- **FEXCore** as an alternative x86/x64 emulation backend.
+- **FEXCore** as an alternative x86/x64 emulation backend — with **automatic unixlib (`.so`) matching**: whichever FEXCore version you pick per game or container, the native `.so` companion is kept in sync on every launch (matched for unixlib builds, cleared for DLL-only), so there's never a stale or mismatched `.so`.
 - **arm64ec** and **x64** container support.
 
 ### 🎨 Graphics & translation layers
@@ -175,7 +190,8 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - **BCn transcoding for Mali / Xclipse** — a **"Wrapper + bcn_layer"** graphics driver ([leegao](https://github.com/leegao)'s [bcn_layer](https://github.com/leegao/bcn_layer), shader-v3) that decodes BC textures on the GPU, so BCn games run on GPUs without hardware BC support — with a **BCn Layer Settings** panel (force-decode, ETC2 / ASTC transcode, image-view mode, debug logging). An experimental **"Wrapper-gamenative"** driver (BCn baked into the wrapper, Adreno-only) is also selectable. *(Device-proven on Mali-G57.)*
 
 ### 🖥️ Renderers
-- Multiple host renderers — **Vulkan**, **OpenGL**, and **VirGL**.
+- Multiple host renderers — **Vulkan**, **OpenGL**, **SurfaceFlinger**, and **VirGL**.
+- **SurfaceFlinger renderer colour fix** — the SurfaceFlinger (ASurfaceRenderer) host renderer got a crash + colour-accuracy fix (red/blue channel swap corrected, GPU-side format converter, proper fencing), with a **"Correct SurfaceFlinger colours"** toggle available **per container and per game** (shown inline under the Renderer picker when SurfaceFlinger is selected, on by default). *(Ported from [GameNative](https://github.com/utkarshdalal/GameNative) #1620 / #1644.)*
 - > ℹ️ The **Vulkan host renderer** uses the rendering path from **[StevenMXZ](https://github.com/StevenMXZ/Winlator-Ludashi)** (Winlator-Ludashi); its `AHardwareBuffer` present path — what makes Vulkan / DXVK / VKD3D content actually display correctly — was ported from / cross-examined against **[GameNative](https://github.com/utkarshdalal/GameNative)**. See [Credits](#-credits).
 - **Native Rendering (Low-Latency Mode)** — low-latency direct-scanout presentation on **both the Vulkan *and* OpenGL renderers**, skipping the compositor blit to cut input lag (mutually exclusive with that renderer's post-processing effects / scaling, since it bypasses the compositor).
 - **Spatial upscalers on *both* the Vulkan *and* OpenGL renderers** — **SGSR** (Snapdragon GSR 1.0) and **FSR / FSR-Fit** (AMD FidelityFX Super Resolution 1.0), plus **NIS** (NVIDIA Image Scaling, Vulkan), a **Sharpen** (RCAS) mode and Linear / Nearest, all switchable live in the in-game drawer. On Vulkan it engages when a game renders below display resolution; on OpenGL it renders the scene at a reduced internal resolution and reconstructs it back up. Every sharpness slider runs 0 (off) → 100 (max). Your chosen scaling mode is now **remembered per game** across relaunch.
@@ -202,7 +218,7 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - **Redesigned container cards** — a clean spec-chip layout (renderer · DXVK on top, driver · VKD3D · backend beneath) that matches the game cards.
 - **Auto-close on game exit** — the session closes itself once the launched game quits (per-container "Close when game exits" toggle, on by default), so you're not left at a black Wine desktop.
 - **Import / export** containers to move or back up setups.
-- Per-container control of Wine version, graphics driver, DXVK / VKD3D version, Box64 preset, drive mappings, Z-drive selector, and environment variables.
+- Per-container control of Wine version, graphics driver, DXVK / VKD3D version, Box64 preset, drive mappings, Z-drive selector, and environment variables — the **Add Environment Variable** picker includes a large set of **presets** (DXVK / VKD3D / Wine / Mesa) with typed value editors, so common tuning vars are one tap away.
 - **Desktop wallpaper picker** — set an image as a container's Wine desktop wallpaper from the container editor, and choose whether it applies to **just this container** or **globally** to all of them.
 - **Compatibility Layers download menu** — a cloud button on each component (Wine/Proton, DXVK, VKD3D, Box64/WOWBox64, FEXCore) opens a downloader to browse, install or remove versions, with **Wine/Proton tabs**, an **"in use"** marker, **install-from-file**, and **byte-accurate download + install progress bars**.
 
@@ -244,6 +260,7 @@ The Steam / Epic / GOG / Amazon sign-ins are a **third-party login system, exact
 - In-game overlay drawer for settings, input, and quick toggles, with a Task Manager that lists processes as cards and can launch new tasks on any renderer.
 - **Built-in File Manager with Favorites** — bookmark folders and jump to them from a dedicated list, each labelled by storage source (Internal / SD card / a container's Drive C: or Z:) and full path. Image files show **real thumbnails**, and the File Manager doubles as the app's **file picker for every import** (WCP / ICP / wallpaper / drivers / assets) — reliable on OEM skins where Android's system picker fails, with the system picker still available as a secondary option.
 - **Performance HUD** — FPS, frame time, CPU/GPU temperature, and RAM, in vertical or horizontal layout, with its on-screen **position saved per game**.
+- **FEX runtime indicator** — a live badge in the Graphics tab shows what's actually translating the running game: **arm64ec** vs **x86-64**, the translator (**FEXCore / wowbox64 / Box64**), and — for FEXCore — whether the native **unixlib (`.so`)** or the classic **DLL** path is active. Read straight from the running process, so it reflects reality, not just the setting.
 
 ### 📥 Builds & distribution
 - **Three build flavors** with distinct package IDs — *standard*, *PuBG*, and *Ludashi*.
@@ -397,7 +414,7 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **JavaSteam** | [JavaSteam](https://github.com/Longi94/JavaSteam) (`in.dragonbra:javasteam`) by **Longi94** — the Steam **connection-manager client** the built-in Steam store logs in and talks to Steam with, and — via the **`javasteam-depotdownloader`** fork by **joshuatam** — the **entire depot-download engine** Bannerlator's Steam store is built on. |
 | **Goldberg Steam Emu / gbe_fork** | [Goldberg Steam Emu](https://mr_goldberg.gitlab.io/goldberg_emulator/) by **Mr_Goldberg**, and **gbe_fork** by **[Detanup01](https://github.com/Detanup01/gbe_fork)** — the Steam emulator Bannerlator's **Goldberg auto-patch** installs (Regular / Experimental / ColdClient tiers) for offline / emulated play of games you own. |
 | **Pluvia** | [Pluvia](https://github.com/oxters168/Pluvia) — an Android Steam client whose patterns were **referenced alongside GameNative** while building the Steam store's login / session handling. |
-| **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. **In 2.3**, building on JavaSteam / GameNative / Goldberg, the original engineering is Bannerlator's own: the **cross-store Download Manager**, the **four storefront integrations** (Steam / Epic / GOG / Amazon), the multi-week **Steam session-hardening** work, the depot **OOM fix**, the **Goldberg auto-patch** integration, the store **Material-3 restyle**, and the store-log **credential redaction** (`StoreLog.redactUrl`). **In 2.4**, the **fullscreen aspect-ratio pipeline** (Off/Fit/Stretch/Fill/Integer across all three renderers), the **in-app File-Manager import picker** replacing SAF (with image thumbnails + percent/ETA import progress), the **DLC picker**, the **true-size depot install fix**, **per-game persistence** of scaling / fullscreen / HUD position, and the **container wallpaper picker**. **In 2.5**, the **Mali / BCn hardening** — wiring leegao's bcn_layer (shader-v3) + ETC2-Milestone-2 wrapper into the **"Wrapper + bcn_layer"** and experimental **"Wrapper-gamenative"** drivers, the **BCn Layer Settings** UI, and the **in-game logging overhaul** (copy-logs button, selectable log location, co-located DXVK/VKD3D logs, scrollable debug-channels dialog). Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
+| **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. **In 2.3**, building on JavaSteam / GameNative / Goldberg, the original engineering is Bannerlator's own: the **cross-store Download Manager**, the **four storefront integrations** (Steam / Epic / GOG / Amazon), the multi-week **Steam session-hardening** work, the depot **OOM fix**, the **Goldberg auto-patch** integration, the store **Material-3 restyle**, and the store-log **credential redaction** (`StoreLog.redactUrl`). **In 2.4**, the **fullscreen aspect-ratio pipeline** (Off/Fit/Stretch/Fill/Integer across all three renderers), the **in-app File-Manager import picker** replacing SAF (with image thumbnails + percent/ETA import progress), the **DLC picker**, the **true-size depot install fix**, **per-game persistence** of scaling / fullscreen / HUD position, and the **container wallpaper picker**. **In 2.5**, the **Mali / BCn hardening** — wiring leegao's bcn_layer (shader-v3) + ETC2-Milestone-2 wrapper into the **"Wrapper + bcn_layer"** and experimental **"Wrapper-gamenative"** drivers, the **BCn Layer Settings** UI, and the **in-game logging overhaul** (copy-logs button, selectable log location, co-located DXVK/VKD3D logs, scrollable debug-channels dialog). **In 2.5.1**, the **SurfaceFlinger colour + crash fix** and per-container / per-game **"Correct SurfaceFlinger colours"** toggle (ASurfaceRenderer R/B-swap fix + GPU converter, ported from GameNative #1620 / #1644), the in-game **FEX runtime indicator** (arm64ec / x86-64 · FEXCore / wowbox64 / Box64 · unixlib / DLL, read live from `/proc/<pid>/maps`), the **FEXCore unixlib (`.so`) auto-match** at launch (per-game version sync + uninstall cleanup), and **18 new Environment Variable presets** (DXVK / VKD3D / Wine / Mesa). Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
 
 ### Upstream stack
 
@@ -425,6 +442,7 @@ The Wine/translation stack this app bundles or downloads:
 
 Much of Bannerlator's polish is driven by the people who file issues and test builds. Recent features came directly from:
 
+- **Angel** — requested the environment-variable presets that seeded **2.5.1's** new preset set (`DXVK_DISABLE_TIMELINE_SEMAPHORES`, `VKD3D_SHADER_MODEL`).
 - **[@kylinzang](https://github.com/kylinzang)** — the driving force behind **2.5's Mali / BCn support** ([#70](https://github.com/The412Banner/Bannerlator/issues/70), originally #54 / #53): the original request, the env-var spec, the in-game logging overhaul, and iterative on-device testing on Mali-G57 through a full sign-off. Also fullscreen aspect-ratio modes ([#71](https://github.com/The412Banner/Bannerlator/issues/71)) and the in-app File-Manager import picker ([#73](https://github.com/The412Banner/Bannerlator/issues/73)).
 - **[@rizky2-crypto](https://github.com/rizky2-crypto)** — Mali-G610 BCn testing ([#30](https://github.com/The412Banner/Bannerlator/issues/30)).
 - **[@SombraShadow](https://github.com/SombraShadow)** — the container wallpaper picker ([#66](https://github.com/The412Banner/Bannerlator/issues/66)).

@@ -694,6 +694,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="renderer_driver_id">Renderer Driver</string>
     <string name="renderer_filter_mode">Filter Mode</string>
     <string name="renderer_swap_rb">Swap R/B</string>
+    <string name="renderer_sf_compat">Correct SurfaceFlinger colours</string>
+    <string name="renderer_sf_compat_hint">Fixes swapped red/blue on the SurfaceFlinger renderer (BGRA→RGBA). Turn off only if colours look correct without it.</string>
     <string name="renderer_present_mode_fifo">FIFO</string>
     <string name="renderer_present_mode_mailbox">Mailbox</string>
     <string name="renderer_present_mode_immediate">Immediate</string>
